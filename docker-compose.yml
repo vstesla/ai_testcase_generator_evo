@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./TestCasesGenerator
+      dockerfile: Dockerfile
+    container_name: ai_testcase_generator_backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./TestCasesGenerator/.env
+    restart: unless-stopped
+    volumes:
+      - ./TestCasesGenerator:/app
+    # 如果需要在本地直接映射代码以方便开发调试，可以保留 volumes；
+    # 生产部署时建议移除该映射或改为只读。
+
+  frontend:
+    build:
+      context: ./TestCasesGeneratorWeb
+      dockerfile: Dockerfile
+    container_name: ai_testcase_generator_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped

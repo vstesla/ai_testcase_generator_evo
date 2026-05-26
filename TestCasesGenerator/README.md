@@ -26,7 +26,21 @@
 
 ## 2. 环境依赖与运行
 
-### 2.1 环境配置
+### 2.1 容器化部署（推荐）
+本项目已完成全栈容器化，支持一键部署。请确保本地已安装 [Docker](https://www.docker.com/) 和 Docker Compose。
+
+在项目**根目录（TestCasesGeneratorEVO）**下，执行以下命令即可启动前后端服务：
+```bash
+docker-compose up -d --build
+```
+- 前端页面访问：`http://localhost` (Nginx 代理，端口 80)
+- 后端 API 访问：`http://localhost:8000/docs` (FastAPI Swagger 文档)
+
+**注意事项**：
+1. 启动前，请确保在 `TestCasesGenerator` 目录下创建并配置好 `.env` 文件（如 COS 和 MySQL 环境变量）。
+2. 容器内已默认安装 Playwright 所需的 Chromium 浏览器及相关依赖，无需手动执行安装命令。
+
+### 2.2 本地环境配置
 本项目使用 Python 编写，主要依赖项包括 `FastAPI`, `Uvicorn`, `Playwright` 等。请确保您已配置相关的数据库 (MySQL) 与 COS 存储环境变量。
 
 如果需要使用 `in_flight_rules_automation_tools` 进行 UI 自动化，请确保已安装 Playwright 驱动：
