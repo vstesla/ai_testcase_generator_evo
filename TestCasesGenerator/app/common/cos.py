@@ -7,12 +7,12 @@ from datetime import datetime
 from app.common.db.db_utils import DBUtils as DB # 删除
 
 serviceType = 's3'
-access_key = 'lt8605-user1-dev'
-secretKey = 'cmHK2222222222'
-endpoint = 'https://lt8605-user1-dev.cos.ap-shanghai.myqcloud.com'
-region = 'shenzhen'
+access_key = os.getenv('COS_SECRET_ID', '')
+secretKey = os.getenv('COS_SECRET_KEY', '')
+endpoint = os.getenv('COS_ENDPOINT', 'https://cos.ap-guangzhou.myqcloud.com')
+region = os.getenv('COS_REGION', 'ap-guangzhou')
 verifyIsNot = False
-bucketName = 'lt8605-user1-dev-1255000126'
+bucketName = os.getenv('COS_BUCKET_NAME', 'testcasesgeneratorcos-1304137470')
 
 def file_id_generator():
     if not DB.connect():

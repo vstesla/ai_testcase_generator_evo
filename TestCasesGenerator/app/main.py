@@ -1,5 +1,9 @@
 import sys
 import os
+from dotenv import load_dotenv
+
+# 加载 .env 环境变量
+load_dotenv()
 
 # 将项目根目录添加到 sys.path，解决直接运行 main.py 时的 "No module named 'app'" 报错
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
