@@ -1,0 +1,504 @@
+.ai-tcg-main-page {
+  width: 80%;
+  margin: 0 auto;
+  padding: 40px 24px;
+  background-color: #ffffff;
+  animation: fadeInScale 0.8s ease-out;
+}
+
+
+/* 标题区域样式 */
+.ai-tcg-header-section {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.ai-tcg-main-title {
+  font-size: 32px;
+  font-weight: 600;
+  color: #1890ff;
+  margin: 0 0 12px 0;
+  line-height: 1.2;
+}
+
+.ai-tcg-subtitle {
+  font-size: 16px;
+  color: #666666;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* 开关区域样式 */
+.ai-tcg-switch-section {
+  margin-bottom: 48px;
+  padding: 32px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.ai-tcg-switch-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  justify-content: center; /* 居中对齐 */
+  align-items: center;
+}
+
+.ai-tcg-switch-item {
+  display: flex;
+  align-items: center;
+  gap: 8px; /* 减小间距以适应单行显示 */
+  white-space: nowrap; /* 强制文本不换行 */
+}
+
+.ai-tcg-switch-label {
+  font-size: 16px;
+  color: #000000;
+  font-weight: 500;
+  white-space: nowrap; /* 强制标签不换行 */
+}
+
+/* 文件上传区域样式 */
+.ai-tcg-upload-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 48px;
+  padding: 32px;
+  background-color: #f8f9fa;
+  border-radius: 8px;
+}
+
+.ai-tcg-upload-area-container {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.ai-tcg-upload-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.ai-tcg-upload-area .ant-upload {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+
+.ai-tcg-upload-description {
+  font-size: 14px;
+  color: #999999;
+  text-align: center;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* 按钮容器居中 */
+.ai-tcg-generate-btn {
+  display: block;
+  margin: 0 auto;
+  width: 180px;
+  height: 48px;
+  font-size: 16px;
+  font-weight: 500;
+  border-radius: 6px;
+}
+
+/* 生成结果区域样式 */
+.ai-tcg-result-section {
+  background-color: #ffffff;
+  border-radius: 8px;
+  padding: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  transition: all 0.4s ease-in-out;
+}
+
+.ai-tcg-result-section.visible {
+  opacity: 1;
+  transform: translateY(0);
+  margin-top: 24px;
+  max-height: 2000px; /* 足够大的高度以容纳内容 */
+  visibility: visible;
+}
+
+.ai-tcg-result-section.hidden {
+  opacity: 0;
+  transform: translateY(-20px);
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  max-height: 0;
+  overflow: hidden;
+  border: none;
+  box-shadow: none;
+  visibility: hidden;
+}
+
+.ai-tcg-result-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.ai-tcg-result-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #000000;
+  margin: 0;
+  animation: slideInLeft 0.6s ease-out;
+}
+
+.ai-tcg-filter-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.ai-tcg-filter-count {
+  background-color: #e6f7ff;
+  color: #1890ff;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  font-weight: 500;
+  border: 1px solid #91d5ff;
+}
+
+/* 搜索筛选工具栏样式 */
+.ai-tcg-search-filter-toolbar {
+  margin-bottom: 24px;
+  padding: 16px;
+  background-color: #fafafa;
+  border-radius: 8px;
+  border: 1px solid #f0f0f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  animation: fadeInUp 0.4s ease-out;
+  transition: all 0.3s ease;
+}
+
+.ai-tcg-search-filter-toolbar:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  border-color: #d9d9d9;
+}
+
+/* 搜索筛选组件样式 - 避免影响日期选择器 */
+.ai-tcg-search-filter-toolbar .ant-input,
+.ai-tcg-search-filter-toolbar .ant-select {
+  transition: all 0.3s ease;
+}
+
+.ai-tcg-search-filter-toolbar .ant-input:hover,
+.ai-tcg-search-filter-toolbar .ant-select:hover .ant-select-selector {
+  border-color: #40a9ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.1);
+}
+
+.ai-tcg-search-filter-toolbar .ant-input:focus,
+.ai-tcg-search-filter-toolbar .ant-select-focused .ant-select-selector {
+  border-color: #40a9ff;
+  box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+}
+
+/* 日期选择器使用Ant Design默认样式，避免任何自定义干扰 */
+/* .ai-tcg-search-filter-toolbar .ant-picker { */
+  /* 不添加任何自定义样式，使用默认行为 */
+/* } */
+
+
+/* 表格样式优化 */
+.ant-table {
+  border-radius: 6px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
+.ant-table:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.ant-table-thead>tr>th {
+  background-color: #f0f2f5;
+  font-weight: 600;
+  color: #000000;
+  transition: all 0.3s ease;
+}
+
+.ant-table-tbody>tr {
+  transition: all 0.3s ease;
+}
+
+.ant-table-tbody>tr:hover {
+  background-color: #f5f7fa;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.ant-table-tbody>tr>td {
+  border-bottom: 1px solid #f0f0f0;
+  transition: all 0.3s ease;
+}
+
+/* 下载按钮悬停效果 */
+.ant-btn {
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.ant-btn:hover:not(.ant-btn-disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+}
+
+.ant-btn-primary:hover:not(.ant-btn-disabled)::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    left: -100%;
+  }
+
+  100% {
+    left: 100%;
+  }
+}
+
+
+/* 生成结果区域悬停效果 */
+.ai-tcg-result-section {
+  transition: all 0.3s ease;
+}
+
+.ai-tcg-result-section:hover {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px);
+}
+
+
+
+/* 动画效果 */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeInScale {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes rowSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* 表格行动画 */
+.ant-table-tbody>tr {
+  animation: rowSlideIn 0.5s ease-out;
+}
+
+.ant-table-tbody>tr:nth-child(1) {
+  animation-delay: 0.1s;
+}
+
+.ant-table-tbody>tr:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.ant-table-tbody>tr:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+.ant-table-tbody>tr:nth-child(4) {
+  animation-delay: 0.4s;
+}
+
+
+.ai-tcg-switch-section,
+.ai-tcg-upload-section {
+  transition: all 0.3s ease;
+}
+
+.ai-tcg-switch-section:hover,
+.ai-tcg-upload-section:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.ai-tcg-generate-btn {
+  transition: all 0.3s ease;
+}
+
+.ai-tcg-generate-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(24, 144, 255, 0.3);
+}
+
+/* 禁用状态的按钮样式 */
+.ai-tcg-generate-btn[disabled],
+.ai-tcg-generate-btn[disabled]:hover,
+.ai-tcg-generate-btn[disabled]:focus,
+.ai-tcg-generate-btn[disabled]:active {
+  background-color: #f5f5f5 !important;
+  color: rgba(0, 0, 0, 0.25) !important;
+  border-color: #d9d9d9 !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  cursor: not-allowed;
+  transition: all 0.3s ease;
+}
+
+/* 禁用状态下 hover 稍微加深背景色，类似开关效果 */
+.ai-tcg-generate-btn[disabled]:hover {
+  background-color: rgba(0, 0, 0, 0.04) !important; /* 与 Ant Design 开关禁用状态类似的颜色 */
+}
+
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .ai-tcg-main-page {
+    padding: 24px 16px;
+  }
+
+  .ai-tcg-main-title {
+    font-size: 24px;
+  }
+
+  .ai-tcg-subtitle {
+    font-size: 14px;
+  }
+
+  .ai-tcg-switch-group {
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  .ai-tcg-switch-section,
+  .ai-tcg-upload-section {
+    padding: 24px;
+  }
+
+  .ai-tcg-upload-area .ant-upload {
+    width: 100%;
+  }
+
+  .ai-tcg-generate-btn {
+    width: 100%;
+    max-width: 200px;
+  }
+
+  .ai-tcg-result-section {
+    padding: 16px;
+  }
+
+  .ant-table {
+    font-size: 12px;
+  }
+
+  .ai-tcg-result-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ai-tcg-search-filter-toolbar {
+    padding: 12px;
+  }
+
+  .ai-tcg-search-filter-toolbar .ant-space {
+    width: 100%;
+  }
+
+  .ai-tcg-search-filter-toolbar .ant-input,
+  .ai-tcg-search-filter-toolbar .ant-select,
+  .ai-tcg-search-filter-toolbar .ant-picker {
+    width: 100% !important;
+    margin-bottom: 8px;
+  }
+}
+
+
+
+/* Antd组件样式覆盖 */
+.ant-switch {
+  background-color: #d9d9d9;
+}
+
+.ant-switch-checked {
+  background-color: #1890ff;
+}
+
+.ant-btn-primary {
+  background-color: #1890ff;
+  border-color: #1890ff;
+}
+
+.ant-btn-primary:hover,
+.ant-btn-primary:focus {
+  background-color: #40a9ff;
+  border-color: #40a9ff;
+}
+
+.ant-upload {
+  width: 100%;
+}
+
+.ant-table {
+  background-color: #ffffff;
+}
+
+.ant-table-thead>tr>th {
+  background-color: #fafafa;
+  font-weight: 600;
+}

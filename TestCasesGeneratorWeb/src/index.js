@@ -1,0 +1,14 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import { ConfigProvider } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
+import AiTestCaseGenerator from './components/pages/AiTestCaseGenerator';
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(
+  <React.StrictMode>
+    <ConfigProvider locale={zhCN}>
+      <AiTestCaseGenerator />
+    </ConfigProvider>
+  </React.StrictMode>
+);
