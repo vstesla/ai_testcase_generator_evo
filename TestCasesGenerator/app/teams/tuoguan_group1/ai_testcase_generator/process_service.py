@@ -516,32 +516,83 @@ class ProcessService:
     async def _do_jktzs_generalization(self, test_audit_id, raw_data, current_data):
         """
         调用大模型对单笔缴款通知书数据进行泛化生成。
+
+        Args:
+            test_audit_id: 测试审计ID
+            raw_data: 原始数据字典（用于LLM输入）
+            current_data: 当前数据字典（将被更新）
         """
         try:
             import asyncio
-            gen_result = await asyncio.to_thread(self.llm_service.generate_jktzs, **raw_data)
             import json
+            logger.info(f"[Generalization] Starting for test_audit_id: {test_audit_id}")
+            logger.debug(f"[Generalization] Input raw_data: {raw_data}")
+
+            gen_result = await asyncio.to_thread(self.llm_service.generate_jktzs, **raw_data)
+            logger.debug(f"[Generalization] LLM returned type: {type(gen_result).__name__}")
+            logger.debug(f"[Generalization] LLM returned value: {gen_result}")
+
+            # 如果返回的是字符串，尝试解析为JSON
             if isinstance(gen_result, str):
-                try: gen_result = json.loads(gen_result)
-                except (ValueError, TypeError): pass
-            if isinstance(gen_result, dict): current_data.update(gen_result)
+                try:
+                    gen_result = json.loads(gen_result)
+                    logger.debug(f"[Generalization] Parsed string to dict: {gen_result}")
+                except json.JSONDecodeError as je:
+                    logger.warning(f"[Generalization] Failed to parse as JSON: {je}")
+                    logger.warning(f"[Generalization] Raw result: {gen_result[:200] if len(gen_result) > 200 else gen_result}")
+
+            # 如果是字典，更新current_data
+            if isinstance(gen_result, dict):
+                current_data.update(gen_result)
+                logger.info(f"[Generalization] Successfully updated current_data for {test_audit_id}")
+                logger.debug(f"[Generalization] Updated current_data: {current_data}")
+            else:
+                logger.warning(f"[Generalization] LLM did not return a dict for {test_audit_id}, type: {type(gen_result).__name__}")
+
         except Exception as e:
-            logger.error(f"JKTZS generalization failed for {test_audit_id}: {e}")
+            logger.error(f"[Generalization] Failed for {test_audit_id}: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     async def _do_jktzs_adversarial(self, test_audit_id, current_data):
         """
         调用大模型对单笔缴款通知书数据进行对抗样本生成。
+
+        Args:
+            test_audit_id: 测试审计ID
+            current_data: 当前数据字典（将被更新，包含泛化后的数据）
         """
         try:
             import asyncio
-            adv_result = await asyncio.to_thread(self.llm_service.generate_jktzs_adversarial, **current_data)
             import json
+            logger.info(f"[Adversarial] Starting for test_audit_id: {test_audit_id}")
+            logger.debug(f"[Adversarial] Input current_data: {current_data}")
+
+            adv_result = await asyncio.to_thread(self.llm_service.generate_jktzs_adversarial, **current_data)
+            logger.debug(f"[Adversarial] LLM returned type: {type(adv_result).__name__}")
+            logger.debug(f"[Adversarial] LLM returned value: {adv_result}")
+
+            # 如果返回的是字符串，尝试解析为JSON
             if isinstance(adv_result, str):
-                try: adv_result = json.loads(adv_result)
-                except (ValueError, TypeError): pass
-            if isinstance(adv_result, dict): current_data.update(adv_result)
+                try:
+                    adv_result = json.loads(adv_result)
+                    logger.debug(f"[Adversarial] Parsed string to dict: {adv_result}")
+                except json.JSONDecodeError as je:
+                    logger.warning(f"[Adversarial] Failed to parse as JSON: {je}")
+                    logger.warning(f"[Adversarial] Raw result: {adv_result[:200] if len(adv_result) > 200 else adv_result}")
+
+            # 如果是字典，更新current_data
+            if isinstance(adv_result, dict):
+                current_data.update(adv_result)
+                logger.info(f"[Adversarial] Successfully updated current_data for {test_audit_id}")
+                logger.debug(f"[Adversarial] Updated current_data: {current_data}")
+            else:
+                logger.warning(f"[Adversarial] LLM did not return a dict for {test_audit_id}, type: {type(adv_result).__name__}")
+
         except Exception as e:
-            logger.error(f"JKTZS adversarial failed for {test_audit_id}: {e}")
+            logger.error(f"[Adversarial] Failed for {test_audit_id}: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
     def _extend_df_list(self, df_list, group, current_data):
         """
@@ -1197,7 +1248,8 @@ class ProcessService:
 
         EVALUATION_WHITELIST = {
             "ZLFJ_JKTZSHRGXY": { "strict": {'jkrq', 'yjkje', 'skr', 'skzh', 'zqdm_1', 'zqdm'}, "fuzzy": {'khx', 'zqjc', 'zqmc', 'hkbz', 'cpmc'} },
-            "ZLFJ_CKXY": { "strict": set(), "fuzzy": set() }
+            "ZLFJ_CKXY": { "strict": set(), "fuzzy": set() },
+            "ZLFJ_BDHT": { "strict": {'sfhm', 'sfzh', 'zrjg', 'sxtj'}, "fuzzy": {'bdcplx', 'bdcptzfw', 'fkxjtj', 'fklj', 'yt', 'syqzr', 'xjtj'} }
         }
         current_whitelist = EVALUATION_WHITELIST.get(file_type, {"strict": set(), "fuzzy": set()})
         strict_fields = current_whitelist["strict"].copy()
@@ -1336,12 +1388,12 @@ class ProcessService:
 
         return downloaded_files, temp_files_to_cleanup
 
-    def _create_single_pdf_stream(self, pdf_path: str, test_case_id: str, file_type: str, file_sub_type: str) -> tuple:
+    def _create_single_file_stream(self, file_path: str, test_case_id: str, file_type: str, file_sub_type: str) -> tuple:
         """
-        创建单个PDF文件流
+        创建单个文件流（支持PDF、XLSX等多种格式）
 
         Args:
-            pdf_path: PDF文件路径
+            file_path: 文件路径
             test_case_id: 测试用例ID
             file_type: 文件类型
             file_sub_type: 文件子类型
@@ -1349,20 +1401,25 @@ class ProcessService:
         Returns:
             tuple: (文件流, 文件名, 是否为zip)
         """
-        with open(pdf_path, 'rb') as f:
+        with open(file_path, 'rb') as f:
             file_stream = BytesIO(f.read())
 
-        filename = self._build_filename(test_case_id, file_type, file_sub_type, '.pdf')
-        logger.info(f"Returning single PDF: {filename}")
+        # 根据实际文件扩展名确定输出文件名
+        _, actual_ext = os.path.splitext(file_path)
+        if not actual_ext:
+            actual_ext = '.bin'  # 默认扩展名
+
+        filename = self._build_filename(test_case_id, file_type, file_sub_type, actual_ext)
+        logger.info(f"Returning single file: {filename}")
 
         return file_stream, filename, False
 
-    def _create_zip_stream(self, pdf_files: List[str], test_case_id: str, file_type: str, file_sub_type: str) -> tuple:
+    def _create_zip_stream(self, files: List[str], test_case_id: str, file_type: str, file_sub_type: str) -> tuple:
         """
-        创建ZIP压缩包文件流
+        创建ZIP压缩包文件流（支持PDF、XLSX等多种格式）
 
         Args:
-            pdf_files: PDF文件路径列表
+            files: 文件路径列表
             test_case_id: 测试用例ID
             file_type: 文件类型
             file_sub_type: 文件子类型
@@ -1370,43 +1427,47 @@ class ProcessService:
         Returns:
             tuple: (文件流, 文件名, 是否为zip)
         """
-        file_count = len(pdf_files)
+        file_count = len(files)
         zip_filename = self._build_filename(test_case_id, file_type, file_sub_type, '.zip', file_count)
 
         zip_stream = BytesIO()
         with zipfile.ZipFile(zip_stream, 'w', zipfile.ZIP_DEFLATED) as zipf:
-            for idx, pdf_path in enumerate(pdf_files):
-                arcname = self._get_archive_name(pdf_path, test_case_id, idx)
-                zipf.write(pdf_path, arcname)
+            for idx, file_path in enumerate(files):
+                arcname = self._get_archive_name(file_path, test_case_id, idx)
+                zipf.write(file_path, arcname)
 
         zip_stream.seek(0)
         logger.info(f"Returning ZIP archive: {zip_filename} with {file_count} files")
 
         return zip_stream, zip_filename, True
 
-    def _get_archive_name(self, pdf_path: str, test_case_id: str, index: int) -> str:
+    def _get_archive_name(self, file_path: str, test_case_id: str, index: int) -> str:
         """
-        获取ZIP内的归档文件名
+        获取ZIP内的归档文件名（支持PDF、XLSX等多种格式）
 
         Args:
-            pdf_path: PDF文件路径
+            file_path: 文件路径
             test_case_id: 测试用例ID
             index: 文件索引
 
         Returns:
             str: 归档文件名
         """
-        arcname = os.path.basename(pdf_path).replace('temp_download_', '')
+        arcname = os.path.basename(file_path).replace('temp_download_', '')
 
         # 如果文件名包含attachment或过长，则使用序号命名
         if 'attachment' in arcname.lower() or len(arcname) > 50:
-            return f"{test_case_id}_{index+1}.pdf"
+            # 根据实际文件扩展名确定输出文件名
+            _, actual_ext = os.path.splitext(file_path)
+            if not actual_ext:
+                actual_ext = '.bin'
+            return f"{test_case_id}_{index+1}{actual_ext}"
 
         return arcname
     
     async def download_files_as_stream(self, test_case_id: str, file_type: str = None, file_sub_type: str = None):
         """
-        根据test_case_id从COS下载PDF文件，返回文件流供前端下载
+        根据test_case_id从COS下载文件，返回文件流供前端下载（支持PDF、XLSX等多种格式）
 
         Args:
             test_case_id: 测试用例ID（案例集ID）
@@ -1415,8 +1476,8 @@ class ProcessService:
 
         Returns:
             tuple: (文件流, 文件名, 是否为zip)
-                  - 单个PDF: (BytesIO流, "文件名.pdf", False)
-                  - 多个PDF: (BytesIO流, "压缩包名.zip", True)
+                  - 单个文件: (BytesIO流, "文件名.扩展名", False)
+                  - 多个文件: (BytesIO流, "压缩包名.zip", True)
         """
         logger.info(f"Starting download for test_case_id: {test_case_id}")
 
@@ -1439,12 +1500,12 @@ class ProcessService:
         downloaded_files, temp_files = await self._download_all_attachments(attachments)
 
         if not downloaded_files:
-            raise ValueError("未能成功下载任何PDF文件")
+            raise ValueError("未能成功下载任何文件")
 
         try:
             # 4. 根据文件数量返回相应的文件流
             if len(downloaded_files) == 1:
-                return self._create_single_pdf_stream(downloaded_files[0], test_case_id, file_type, file_sub_type)
+                return self._create_single_file_stream(downloaded_files[0], test_case_id, file_type, file_sub_type)
             else:
                 return self._create_zip_stream(downloaded_files, test_case_id, file_type, file_sub_type)
         finally:

@@ -147,9 +147,9 @@ async def generate(
 @router.post("/generate_attachments", response_model=GenerateResponse)
 async def generate_attachments(
         business_process: str = Form(...,
-                                     description="业务流程 (如'他行定存-线上-不开具实证书必备条款'或'缴款通知书')"),
-        jktzs_file: UploadFile = File(None, description="缴款通知书测试集.xlsx文件上传"),
-        jktzs_template: UploadFile = File(None, description="缴款通知书模板.docx文件上传"),
+                                     description="业务流程 (如'存款协议'、'缴款通知书'、'标的合同'等)"),
+        jktzs_file: UploadFile = File(None, description="测试集.xlsx文件上传 (缴款通知书/标的合同等)"),
+        jktzs_template: UploadFile = File(None, description="模板.docx文件上传 (缴款通知书/标的合同等)"),
         file_count: Optional[int] = Form(1, ge=0, description="需要生成的指令附件pdf的数量"),
         enable_generalization: bool = Form(False, description="泛化开关"),
         enable_adversarial: bool = Form(False, description="对抗生成开关"),
@@ -157,8 +157,8 @@ async def generate_attachments(
 ):
     """
     指令附件生成接口：
-    1. 支持原有的存款协议生成 (business_process非'缴款通知书')
-    2. 支持缴款通知书生成 (business_process为'缴款通知书')
+    1. 支持原有的存款协议生成(business_process非 缴款通知书/标的合同)
+    2. 支持基于模板的生成(business_process为 缴款通知书/标的合同)
     """
     timestamp = int(time.time() * 1000)
     date_str = datetime.now().strftime("%Y-%m-%d")
@@ -166,7 +166,7 @@ async def generate_attachments(
 
     # === 分发业务处理逻辑 ===
     # 1. 存款协议逻辑
-    if business_process != "缴款通知书":
+    if business_process not in ["缴款通知书", "标的合同"]:
         if file_count <= 0:
             raise HTTPException(status_code=400, detail="存款协议生成需要指定文件数量大于0")
         try:
@@ -186,9 +186,9 @@ async def generate_attachments(
             logger.error(f"CKXY Processing failed: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    # 2. 缴款通知书逻辑
+    # 2. 基于模板的文档生成逻辑 (缴款通知书/标的合同等)
     if not jktzs_file or not jktzs_template:
-        raise HTTPException(status_code=400, detail="生成缴款通知书需要上传测试集和模板文件")
+        raise HTTPException(status_code=400, detail="生成该类型文档需要上传测试集和模板文件")
     if file_count <= 0:
         raise HTTPException(status_code=400, detail="需要生成的文件数量必须大于0")
 
@@ -242,27 +242,27 @@ async def generate_attachments(
                 except OSError:
                     pass
 
-@router.get("/download_pdfs")
-async def download_pdfs(
+@router.get("/download_files")
+async def download_files(
     test_case_id: str = Query(..., description="测试用例ID（案例集ID）"),
     file_type: Optional[str] = Query(None, description="文件类型（用于命名）"),
     file_sub_type: Optional[str] = Query(None, description="文件子类型（用于命名）")
 ):
     """
-    流式下载PDF文件接口
+    流式下载文件接口（支持PDF、XLSX等多种格式）
 
     功能：
-    - 如果只有1个PDF文件，直接下载PDF
-    - 如果有多个PDF文件，打包成ZIP后下载
+    - 如果只有1个文件，直接下载该文件
+    - 如果有多个文件，打包成ZIP后下载
 
     命名规则：
-    - 单个PDF: {test_case_id}.pdf
-    - 多个PDF: {test_case_id}_{file_type}_{file_sub_type}_{数量}.zip
+    - 单个文件: {test_case_id}.扩展名（根据实际文件类型）
+    - 多个文件: {test_case_id}_{file_type}_{file_sub_type}_{数量}.zip
 
     流程：
     1. 从数据库查询test_case_id对应的所有附件
-    2. 从COS下载PDF文件到临时目录
-    3. 根据数量决定返回方式（单个PDF或ZIP）
+    2. 从COS下载文件到临时目录
+    3. 根据数量决定返回方式（单个文件或ZIP）
     4. 返回文件流给前端
     5. 清理临时文件
     """
@@ -279,8 +279,12 @@ async def download_pdfs(
         # 根据文件类型设置媒体类型
         if is_zip:
             media_type = "application/zip"
-        else:
+        elif filename.endswith('.xlsx'):
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif filename.endswith('.pdf'):
             media_type = "application/pdf"
+        else:
+            media_type = "application/octet-stream"
 
         # 返回流式响应
         def iterfile():
@@ -299,7 +303,7 @@ async def download_pdfs(
             "Access-Control-Expose-Headers": "Content-Disposition"
         }
 
-        logger.info(f"Returning file: {filename}, type: {'ZIP' if is_zip else 'PDF'}")
+        logger.info(f"Returning file: {filename}, type: {'ZIP' if is_zip else 'FILE'}")
 
         return StreamingResponse(
             iterfile(),
@@ -314,6 +318,7 @@ async def download_pdfs(
         logger.error(f"Download failed for test_case_id {test_case_id}: {e}")
         raise HTTPException(status_code=500, detail=f"下载失败: {str(e)}")
 
+
 @router.get("/ocr_status")
 async def check_ocr_status():
     """
@@ -325,6 +330,113 @@ async def check_ocr_status():
     except Exception as e:
         logger.error(f"Failed to query OCR status: {e}")
         raise HTTPException(status_code=500, detail=f"查询OCR状态失败: {str(e)}")
+
+@router.get("/generation_history")
+async def get_generation_history(
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(20, ge=1, le=100, description="每页数量")
+):
+    """
+    前端查询接口：获取历史生成批次列表（支持分页）。
+    """
+    try:
+        from app.common.db.db_utils import DBUtils
+        db = DBUtils()
+
+        # 计算分页偏移量
+        offset = (page - 1) * page_size
+
+        # 查询总数
+        count_sql = "SELECT COUNT(*) as total FROM ai_testcase_generate_record"
+        total_rows = db.execute_query(count_sql)
+        total = total_rows[0]['total'] if total_rows else 0
+
+        # 查询数据
+        query_sql = """
+            SELECT
+                test_case_id, status, message, create_time, update_time, is_comparison_done
+            FROM ai_testcase_generate_record
+            ORDER BY create_time DESC
+            LIMIT %s OFFSET %s
+        """
+        rows = db.execute_query(query_sql, (page_size, offset))
+
+        result_data = []
+        for row in rows:
+            result_data.append({
+                "test_case_id": row.get("test_case_id"),
+                "status": row.get("status"),
+                "message": row.get("message"),
+                "create_time": row.get("create_time").strftime("%Y-%m-%d %H:%M:%S") if row.get("create_time") else None,
+                "update_time": row.get("update_time").strftime("%Y-%m-%d %H:%M:%S") if row.get("update_time") else None,
+                "is_comparison_done": bool(row.get("is_comparison_done"))
+            })
+
+        return {
+            "code": 200,
+            "message": "success",
+            "data": {
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "records": result_data
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to query generation history: {e}")
+        raise HTTPException(status_code=500, detail=f"查询生成历史失败: {str(e)}")
+
+
+@router.get("/generation_result")
+async def get_generation_result(test_case_id: str = Query(..., description="测试集生成的批次ID")):
+    """
+    前端查询接口：根据 test_case_id 查询单次生成的详情，包含生成的附件列表。
+    """
+    try:
+        from app.common.db.db_utils import DBUtils
+        db = DBUtils()
+
+        # 查询主记录
+        record_rows = db.select(
+            table='ai_testcase_generate_record',
+            columns=['test_case_id', 'status', 'message', 'create_time', 'update_time', 'is_comparison_done'],
+            where={'test_case_id': test_case_id}
+        )
+        if not record_rows:
+            return {"code": 404, "message": "未找到对应的生成记录", "data": None}
+        
+        record = record_rows[0]
+        result_data = {
+            "test_case_id": record.get("test_case_id"),
+            "status": record.get("status"),
+            "message": record.get("message"),
+            "create_time": record.get("create_time").strftime("%Y-%m-%d %H:%M:%S") if record.get("create_time") else None,
+            "update_time": record.get("update_time").strftime("%Y-%m-%d %H:%M:%S") if record.get("update_time") else None,
+            "is_comparison_done": bool(record.get("is_comparison_done")),
+            "attachments": []
+        }
+
+        # 查询附件列表
+        attachments = db.select(
+            table='ai_testcase_generate_attachments',
+            columns=['attachment_id', 'download_url', 'create_time'],
+            where={'test_case_id': test_case_id}
+        )
+        
+        for att in attachments:
+            result_data["attachments"].append({
+                "attachment_id": att.get("attachment_id"),
+                "download_url": att.get("download_url"),
+                "create_time": att.get("create_time").strftime("%Y-%m-%d %H:%M:%S") if att.get("create_time") else None
+            })
+
+        return {"code": 200, "message": "success", "data": result_data}
+
+    except Exception as e:
+        logger.error(f"Failed to query generation result for {test_case_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"查询生成详情失败: {str(e)}")
+
 
 @router.get("/comparison_result")
 async def get_comparison_result(test_case_id: str = Query(..., description="测试集生成的批次ID")):

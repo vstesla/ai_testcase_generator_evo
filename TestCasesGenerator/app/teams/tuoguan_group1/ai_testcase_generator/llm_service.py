@@ -42,22 +42,50 @@ class LLMService:
         return last_answer
 
     def _clean_and_parse_answer(self, last_answer, inputs):
+        """
+        清洗并解析LLM返回的answer内容
+
+        处理步骤：
+        1. 移除```...```标签（AI思考过程）
+        2. 移除Markdown代码块标记
+        3. 解析JSON并提取第一个值
+
+        Args:
+            last_answer: 原始answer字符串
+            inputs: 输入参数（用于降级处理）
+
+        Returns:
+            解析后的结果字符串
+        """
         import json
         clean_answer = last_answer
+
+        # 移除```标签（AI思考过程）
         if "</think>" in clean_answer:
             parts = clean_answer.split("</think>")
             if len(parts) > 1: clean_answer = parts[-1].strip()
-        
+
         try:
+            # 清洗Markdown代码块标记
             clean_answer = clean_answer.strip()
             if clean_answer.startswith("```json"): clean_answer = clean_answer[7:]
             elif clean_answer.startswith("```"): clean_answer = clean_answer[3:]
             if clean_answer.endswith("```"): clean_answer = clean_answer[:-3]
-            
+
+            # 解析JSON并返回完整字典（用于缴款通知书泛化/对抗）
+            # 如果是单值字典（如 spvSubjectType），返回字符串值
+            # 如果是多值字典（如缴款通知书），返回完整字典
             parsed_data = json.loads(clean_answer.strip())
-            if isinstance(parsed_data, dict): return list(parsed_data.values())[0]
+            if isinstance(parsed_data, dict):
+                # 如果只有一个键值对，返回值（兼容旧逻辑）
+                if len(parsed_data) == 1:
+                    return list(parsed_data.values())[0]
+                # 如果有多个键值对，返回完整字典（缴款通知书场景）
+                else:
+                    return parsed_data
             return str(parsed_data)
         except json.JSONDecodeError:
+            # JSON解析失败时返回清洗后的文本
             logger.warning(f"无法解析 JSON: {clean_answer[:50]}...")
             return clean_answer.strip()
 
