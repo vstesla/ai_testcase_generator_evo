@@ -8,7 +8,7 @@ from io import BytesIO
 from typing import List, Dict, Any, Tuple
 from app.common.cos import ObjectStorage
 from app.common.db.db_utils import db_utils
-from app.teams.tuoguan_group1.ai_testcase_generator.llm_service import LLMService
+from app.domain.ClearingService.ai_testcase_generator.llm_service import LLMService
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont

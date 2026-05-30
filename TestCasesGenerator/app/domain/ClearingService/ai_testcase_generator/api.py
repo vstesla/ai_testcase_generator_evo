@@ -2,8 +2,8 @@ from fastapi import APIRouter, HTTPException, Form, UploadFile, File, Query
 from pydantic import BaseModel
 from typing import Optional
 from enum import Enum
-from app.teams.tuoguan_group1.ai_testcase_generator.process_service import ProcessService
-from app.teams.tuoguan_group1.ai_testcase_generator.schemas import GenerateResponse
+from app.domain.ClearingService.ai_testcase_generator.process_service import ProcessService
+from app.domain.ClearingService.ai_testcase_generator.schemas import GenerateResponse
 from app.common.cos import ObjectStorage
 from app.common.db.db_utils import DBUtils
 import logging

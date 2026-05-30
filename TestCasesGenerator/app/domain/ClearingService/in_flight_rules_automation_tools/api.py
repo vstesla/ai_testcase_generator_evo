@@ -7,8 +7,8 @@ import asyncio
 from typing import Type
 
 # 引入基类和具体的实现类
-from app.teams.tuoguan_group1.in_flight_rules_automation_tools.base_rule import BaseInFlightRuleAutomation
-from app.teams.tuoguan_group1.in_flight_rules_automation_tools.oth_bank_fixed_deposit import OthBankFixedDepositAutomation
+from app.domain.ClearingService.in_flight_rules_automation_tools.base_rule import BaseInFlightRuleAutomation
+from app.domain.ClearingService.in_flight_rules_automation_tools.oth_bank_fixed_deposit import OthBankFixedDepositAutomation
 
 logger = logging.getLogger(__name__)
 

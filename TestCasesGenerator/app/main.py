@@ -9,7 +9,7 @@ load_dotenv()
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI
-from app.teams.tuoguan_group1_router import tuoguan_group1_router
+from app.domain.ClearingService_router import clearing_service_router
 import uvicorn
 import logging
 
@@ -35,10 +35,10 @@ async def lifespan(app: FastAPI):
     yield
     # shutdown events if any
 
-app = FastAPI(title="TuoGuan Group 1 Tools", lifespan=lifespan)
+app = FastAPI(title="Clearing Service Tools", lifespan=lifespan)
 
 # 注册路由
-app.include_router(tuoguan_group1_router)
+app.include_router(clearing_service_router)
 
 @app.get("/")
 def read_root():

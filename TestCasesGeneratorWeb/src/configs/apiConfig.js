@@ -33,13 +33,13 @@ const getEnvConfig = () => {
 const API_ENDPOINTS = {
     //智能测试集泛化与附件生成工具
   AI_TESTCASE_GENERATOR: {
-    GENERALIZE_TESTCASES: '/tg1/ai_testcase_generator/generate',
-    GENERATE_ATTACHMENTS: '/tg1/ai_testcase_generator/generate_attachments',
-    DOWNLOAD_ATTACHMENTS: '/tg1/ai_testcase_generator/download_files',
-    GET_OCR_STATUS: '/tg1/ai_testcase_generator/ocr_status',
-    GET_COMPARISON_RESULTS: '/tg1/ai_testcase_generator/comparison_result',
-    GET_GENERATION_HISTORY: '/tg1/ai_testcase_generator/generation_history',
-    GET_GENERATION_RESULT: '/tg1/ai_testcase_generator/generation_result'
+    GENERALIZE_TESTCASES: '/ai_testcase_generator/generate',
+    GENERATE_ATTACHMENTS: '/ai_testcase_generator/generate_attachments',
+    DOWNLOAD_ATTACHMENTS: '/ai_testcase_generator/download_files',
+    GET_OCR_STATUS: '/ai_testcase_generator/ocr_status',
+    GET_COMPARISON_RESULTS: '/ai_testcase_generator/comparison_result',
+    GET_GENERATION_HISTORY: '/ai_testcase_generator/generation_history',
+    GET_GENERATION_RESULT: '/ai_testcase_generator/generation_result'
   }
 };
 

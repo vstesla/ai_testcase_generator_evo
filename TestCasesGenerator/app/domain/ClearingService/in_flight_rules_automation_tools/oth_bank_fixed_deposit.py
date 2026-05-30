@@ -11,7 +11,7 @@ import requests
 from app.common.db.db_utils import DBUtils
 
 # 引入基类，保障扩展性
-from app.teams.tuoguan_group1.in_flight_rules_automation_tools.base_rule import BaseInFlightRuleAutomation
+from app.domain.ClearingService.in_flight_rules_automation_tools.base_rule import BaseInFlightRuleAutomation
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
