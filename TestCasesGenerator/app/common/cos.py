@@ -42,7 +42,7 @@ class ObjectStorage:
             endpoint_url=endpoint,
             region_name=region,
             verify=verifyIsNot,
-            config=Config(signature_version='s3v4')
+            config=Config(signature_version='s3v4', s3={'addressing_style': 'virtual'})
         )
 
     def upload_file(self,upload_file_path: str, storage_path: str,user_id: str, user_name: str) -> str:
