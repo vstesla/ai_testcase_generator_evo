@@ -1,8 +1,8 @@
-# TuoGuan Group 1 Automation Tools
+# Clearing Service Automation Tools
 
 本项目是一个基于 FastAPI 构建的自动化工具集合，旨在为托管业务提供 AI 测试用例生成和清算领域事中规则的自动化校验能力。
 
-本仓库采用了模块化的目录结构，各个工具集在 `app/teams/tuoguan_group1` 目录下独立维护，并通过统一的入口对外提供 API 接口。
+本仓库采用了模块化的目录结构，各个工具集在 `app/domain/ClearingService` 目录下独立维护，并通过统一的入口对外提供 API 接口。
 
 ---
 
@@ -11,7 +11,7 @@
 目前系统集成了以下两大核心工具模块，您可以点击对应链接查看各个模块的详细设计与接口文档：
 
 ### 1.1 智能测试用例生成模块 (`ai_testcase_generator`)
-- **路径**: [`app/teams/tuoguan_group1/ai_testcase_generator`](./app/teams/tuoguan_group1/ai_testcase_generator/)
+- **路径**: [`app/domain/ClearingService/ai_testcase_generator`](./app/domain/ClearingService/ai_testcase_generator/)
 - **功能简介**:
   该模块对接内部 AI Agent 服务，提供测试数据集的自动泛化、对抗样本生成能力。同时支持基于大模型的指令附件（如存款协议、缴款通知书、标的合同）的动态生成与排版渲染，并内置了与“解析小助”对接的比对评测能力。
 - **最新特性**:
@@ -19,13 +19,13 @@
   - 增强了 LLM 输出结果的清洗与解析能力，支持复杂多键值对 JSON 字典的精准回显。
   - 重构了通用文件流生成逻辑，附件下载不再局限于 PDF，动态支持各类文件扩展名。
   - 新增 `/generation_history` 和 `/generation_result` 接口，支持多维度分页历史查询。
-- **文档链接**: [智能测试用例生成接口文档](./app/teams/tuoguan_group1/ai_testcase_generator/README.md)
+- **文档链接**: [智能测试用例生成接口文档](./app/domain/ClearingService/ai_testcase_generator/README.md)
 
 ### 1.2 事中规则自动化测试模块 (`in_flight_rules_automation_tools`)
-- **路径**: [`app/teams/tuoguan_group1/in_flight_rules_automation_tools`](./app/teams/tuoguan_group1/in_flight_rules_automation_tools/)
+- **路径**: [`app/domain/ClearingService/in_flight_rules_automation_tools`](./app/domain/ClearingService/in_flight_rules_automation_tools/)
 - **功能简介**:
   该模块基于 Playwright 构建，用于对前端页面的清算业务事中规则进行自动化 UI 校验。支持动态修改底层数据库数据以构造一致/不一致场景，通过模拟指令录入验证前端页面的红色/绿色拦截提示信息。该模块采用了高度可扩展的“注册表模式”，可轻松接入数百个不同的事中规则。
-- **文档链接**: [事中规则自动化测试接口文档](./app/teams/tuoguan_group1/in_flight_rules_automation_tools/README.md)
+- **文档链接**: [事中规则自动化测试接口文档](./app/domain/ClearingService/in_flight_rules_automation_tools/README.md)
 
 ---
 

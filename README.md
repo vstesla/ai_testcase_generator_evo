@@ -64,4 +64,4 @@ docker-compose up -d --build
 - **测试与清理**: 充分测试正常/异常输入，确保业务稳定；每次测试完成后主动清理产生的临时文件与脏数据。
 
 ---
-*版权所有 © TuoGuan Group 1 Automation Tools*
+*版权所有 © Clearing Service Automation Tools*

@@ -176,16 +176,16 @@ curl -X GET "http://127.0.0.1:8000/ai_testcase_generator/comparison_result?test_
 ### 5.2 目录与数据流向
 
 ### 模式一：测试集泛化流程
-1.  **Step 1**: 用户上传原始 Excel -> 存入 COS 路径 `tuoguan1/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/{filename}`。
+1.  **Step 1**: 用户上传原始 Excel -> 存入 COS 路径 `ClearingService/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/{filename}`。
 2.  **Step 2**: 后端下载原始文件，解析并拆分为 3 个中间文件 (`spvSubjectType.xlsx`, `prdInvestmentScope.xlsx`, `spvInvestmentScope.xlsx`)。
 3.  **Step 3**: 中间文件上传至 COS 路径 `.../intermediate/{filename}`。
 4.  **Step 4**: 后端下载中间文件 -> 调用 **内部 AI Agent 接口** 进行泛化/对抗处理。
-5.  **Step 5**: 生成最终结果 Excel -> 上传至 COS 路径 `tuoguan1/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/{TC_TIMESTAMP}.xlsx`。
+5.  **Step 5**: 生成最终结果 Excel -> 上传至 COS 路径 `ClearingService/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/{TC_TIMESTAMP}.xlsx`。
 
 ### 模式二：存款协议生成流程
 1.  **Step 1**: 后端根据传入的 `business_process`，调用 **内部 AI Agent 接口** 获取协议文本（JSON格式）。
 2.  **Step 2**: 后端解析文本，处理换行与特殊字符，并使用 `reportlab` 库生成带标题和中文字体的 PDF 文件。
-3.  **Step 3**: 循环生成 `file_count` 次，将每个生成的 PDF 上传至 COS 路径 `tuoguan1/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/ckxy/TC_{业务流程}_{序号}_{时间戳}.pdf`。
+3.  **Step 3**: 循环生成 `file_count` 次，将每个生成的 PDF 上传至 COS 路径 `ClearingService/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/ckxy/TC_{业务流程}_{序号}_{时间戳}.pdf`。
 4.  **Step 4**: 将生成记录（含 `test_case_id` 和 `business_process`）插入数据库 `ai_testcase_generate_record` 表。
 5.  **Step 5 (可选, 后台异步)**: 如果 `enable_comparison` 开启，自动将生成的 PDF 提交至 **解析小助** 接口。系统轮询远程数据库获取解析结果，得出评测结论存入数据库 `ai_evaluation_result` 表。
 
@@ -193,7 +193,7 @@ curl -X GET "http://127.0.0.1:8000/ai_testcase_generator/comparison_result?test_
 1.  **Step 1**: 用户上传测试集 (Excel) 和模板 (Word)，后端将文件存入临时目录。模板文件的命名应遵循“附件类型+模板+下划线+附件子类型+序号”的规则（如“缴款通知书模板_证券1”），后端将根据该命名动态调整后续的比对评测白名单。
 2.  **Step 2**: 根据测试集中的 `TEST_AUDIT_ID` 对数据进行分组。如果开启了泛化或对抗开关，则调用 **内部 AI Agent 接口** 针对每组数据生成新内容，并将泛化/对抗后的数据合并保存为新的中间 Excel 文件上传至 COS。
 3.  **Step 3**: 解析 Word 模板中的段落和表格，识别并替换 `$变量名$` 标识符。使用 `reportlab` 库重新排版并渲染成中英文混排、带表格网格线的 PDF 文件。
-4.  **Step 4**: 循环复用测试数据直到满足指定的 `file_count` 数量，将生成的 PDF 批量上传至 COS 路径 `tuoguan1/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/jktzs/TC_缴款通知书_{序号}_{时间戳}.pdf`。
+4.  **Step 4**: 循环复用测试数据直到满足指定的 `file_count` 数量，将生成的 PDF 批量上传至 COS 路径 `ClearingService/ai_testcase_generator/{YYYY-MM-DD_TIMESTAMP}/jktzs/TC_缴款通知书_{序号}_{时间戳}.pdf`。
 5.  **Step 5**: 将生成记录插入数据库 `ai_testcase_generate_record` 表，并返回所有 PDF 的 COS 下载链接。
 6.  **Step 6 (可选, 后台异步)**: 如果 `enable_comparison` 开启，自动将生成的 PDF 提交至 **解析小助** 接口。系统轮询远程数据库获取解析结果，并根据步骤1提取的附件子类型动态提取白名单字段进行评测（完全正确/部分正确/错误），最终结论存入数据库 `ai_evaluation_result` 表，比对明细存入 `attachments_compare_result` 表。
 
@@ -229,7 +229,7 @@ python app/main.py
 ### 运行测试客户端 (Client)
 确保 `Templets/SmartJudgeConfigs.xlsx` 存在，然后在根目录下运行：
 ```powershell
-python app/teams/tuoguan_group1/ai_testcase_generator/test_client.py
+python app/domain/ClearingService/ai_testcase_generator/test_client.py
 ```
 该脚本将自动调用接口并验证结果。
 

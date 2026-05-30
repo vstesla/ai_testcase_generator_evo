@@ -83,7 +83,7 @@
 ### 4.1 本地联调单个规则
 如果仅需调试某一条具体的规则脚本，无需启动 FastAPI，直接运行对应的 Python 文件即可：
 ```bash
-python app/teams/tuoguan_group1/in_flight_rules_automation_tools/oth_bank_fixed_deposit.py
+python app/domain/ClearingService/in_flight_rules_automation_tools/oth_bank_fixed_deposit.py
 ```
 
 ### 4.2 注意事项
