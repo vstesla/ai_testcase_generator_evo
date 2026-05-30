@@ -218,7 +218,19 @@ export const AiTestCaseGeneratorService = {
           timeout: API_CONFIG.TIMEOUT.DOWNLOAD
         }
       );
-      return response.data;
+      
+      // 尝试从 header 中提取文件名
+      let filename = null;
+      const contentDisposition = response.headers && response.headers['content-disposition'];
+      if (contentDisposition) {
+        const filenameMatch = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i) || 
+                              contentDisposition.match(/filename="?([^";]+)"?/i);
+        if (filenameMatch && filenameMatch[1]) {
+          filename = decodeURIComponent(filenameMatch[1]);
+        }
+      }
+      
+      return { blob: response.data, filename };
     } catch (error) {
       console.error('downloadAttachments API Error:', error);
       throw new Error(error.response?.data?.detail || error.message || '接口请求失败');

@@ -18,10 +18,11 @@
 
 - [**TestCasesGenerator (后端)**](./TestCasesGenerator/README.md)
   - 基于 `FastAPI` 构建的高性能异步 API。
-  - 集成了 `Playwright` 用于 UI 自动化，对接大模型服务（LLM），以及腾讯云 COS 对象存储。
+  - 集成了 `Celery` + `Redis` 异步任务队列，支持大批量并发生成任务（如一次性生成 300 份指令附件）。
+  - 集成了 `Playwright` 用于 UI 自动化，全面对接 **DeepSeek (deepseek-v4-flash)** 大模型服务（基于 OpenAI SDK 兼容模式，开启 JSON Output 稳定输出），并引入 `Tenacity` 指数退避重试策略应对网关波动。
 - [**TestCasesGeneratorWeb (前端)**](./TestCasesGeneratorWeb/README.md)
   - 基于 `React` 和 `Ant Design` 构建的现代化单页应用 (SPA)。
-  - 提供响应式的配置面板、进度轮询、历史数据检索及结果分析大屏。
+  - 提供响应式的配置面板、进度定时轮询（完美适配 Celery 后台队列）、历史数据检索及结果分析大屏。
 
 ## 🚀 部署与运行策略
 
@@ -30,13 +31,19 @@
 ### 方案 A：Windows 本地开发模式（主力开发）
 由于部分 Windows 机器底层虚拟化（WSL）组件损坏，**推荐开发调试统一在物理机本地环境运行**。
 
-1. **后端启动**:
+1. **后端 API 启动**:
    ```bash
    cd TestCasesGenerator
-   # 请确保已配置好 .env 文件 (包含 COS_SECRET_ID 等敏感信息)
+   # 请确保已配置好 .env 文件 (包含 COS_SECRET_ID, REDIS_URL, DEEPSEEK_API_KEY 等敏感信息)
    uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
    ```
-2. **前端启动**:
+2. **异步队列 Celery Worker 启动** (必须启动才能处理生成任务):
+   ```bash
+   cd TestCasesGenerator
+   # Windows 环境下推荐使用 threads 池或 solo 模式启动
+   celery -A app.core.celery_app worker --loglevel=info -P threads -c 10
+   ```
+3. **前端启动**:
    ```bash
    cd TestCasesGeneratorWeb
    npm install

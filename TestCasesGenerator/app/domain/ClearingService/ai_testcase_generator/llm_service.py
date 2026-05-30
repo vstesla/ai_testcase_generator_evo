@@ -1,64 +1,74 @@
-import logging
-import requests
+import os
 import json
+import logging
 from typing import List, Dict, Any
+
+from openai import OpenAI, APIConnectionError, RateLimitError, APIStatusError
+from tenacity import retry, wait_exponential, stop_after_attempt, retry_if_exception_type
+
+from app.domain.ClearingService.ai_testcase_generator.agents import (
+    spv_subject_type,
+    prd_investment_scope,
+    spv_investment_scope,
+    adversarial,
+    ckxy,
+    jktzs,
+    jktzs_adversarial
+)
 
 logger = logging.getLogger(__name__)
 
 class LLMService:
     """
-    LLM 服务类，负责调用自定义 API 生成泛化和对抗数据。
+    LLM 服务类，负责调用 DeepSeek API 生成泛化和对抗数据。
+    统一管理和数据清洗解析 LLM 返回的数据。
     """
     def __init__(self):
-        self.api_url = "http://testhub-ai-runtime-gateway.paasuat.cmbchina.cn/agent/v1/chat-messages"
-        self.user_id = "IT703434"
+        # 优先从环境变量获取 DEEPSEEK_API_KEY，如果没有则使用默认值
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "sk-f2e82e6bca1643909869b5ef4c6c4e74")
         
-        # 定义不同任务的 API Token
-        self.tokens = {
-            "spvSubjectType": "app-C2O7pVVdqpfKuVOjrgCfl2dQ",
-            "prdInvestmentScope": "app-C2O7pVVdadawdaOjrgCfl2dQ",
-            "spvInvestmentScope": "app-C2O7pVVmnnuuukOjrgCfl2dQ",
-            "adversarial": "app-C2O7pVVduikanggOjrgCfl2dQ",
-            "ckxy": "app-C2O7pVVauicvggOjrgCfl2dQ",
-            "jktzs": "app-C2O7pVVduikanggOjrgCcv38k",
-            "jktzs_adversarial": "app-C2O7pVVduikanggOjrgCcv66k"
-        }
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com"
+        )
+        self.model = "deepseek-v4-flash" # 使用用户指定的 deepseek-v4-flash 模型
 
-    def _extract_answer_from_stream(self, response):
-        import json
-        last_answer = ""
-        for line in response.iter_lines():
-            if line:
-                decoded_line = line.decode('utf-8').strip()
-                if decoded_line.startswith("data:"):
-                    json_str = decoded_line[5:].strip()
-                    if not json_str: continue
-                    try:
-                        data = json.loads(json_str)
-                        if "answer" in data:
-                            last_answer = data["answer"]
-                    except json.JSONDecodeError:
-                        continue
-        return last_answer
+    # 设计指数退避重试策略应对可能的 AI 网关波动
+    @retry(
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(5),
+        retry=retry_if_exception_type((APIConnectionError, RateLimitError, APIStatusError)),
+        reraise=True
+    )
+    def _call_api_with_retry(self, messages: List[Dict[str, str]]) -> Any:
+        logger.info("Calling DeepSeek API...")
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            response_format={'type': 'json_object'},
+            max_tokens=4096,
+            temperature=0.7
+        )
+        return response.choices[0].message.content
 
-    def _clean_and_parse_answer(self, last_answer, inputs):
+    def _call_deepseek_api(self, messages: List[Dict[str, str]], fallback_val: Any = "[ERROR]") -> Any:
+        try:
+            content = self._call_api_with_retry(messages)
+            return self._clean_and_parse_answer(content)
+        except Exception as e:
+            logger.error(f"DeepSeek API 调用失败（已重试）: {e}")
+            return fallback_val
+
+    def _clean_and_parse_answer(self, last_answer: str) -> Any:
         """
         清洗并解析LLM返回的answer内容
 
         处理步骤：
         1. 移除```...```标签（AI思考过程）
         2. 移除Markdown代码块标记
-        3. 解析JSON并提取第一个值
-
-        Args:
-            last_answer: 原始answer字符串
-            inputs: 输入参数（用于降级处理）
-
-        Returns:
-            解析后的结果字符串
+        3. 解析JSON并提取对应的值
         """
-        import json
-        clean_answer = last_answer
+        clean_answer = last_answer.strip()
 
         # 移除```标签（AI思考过程）
         if "</think>" in clean_answer:
@@ -72,9 +82,6 @@ class LLMService:
             elif clean_answer.startswith("```"): clean_answer = clean_answer[3:]
             if clean_answer.endswith("```"): clean_answer = clean_answer[:-3]
 
-            # 解析JSON并返回完整字典（用于缴款通知书泛化/对抗）
-            # 如果是单值字典（如 spvSubjectType），返回字符串值
-            # 如果是多值字典（如缴款通知书），返回完整字典
             parsed_data = json.loads(clean_answer.strip())
             if isinstance(parsed_data, dict):
                 # 如果只有一个键值对，返回值（兼容旧逻辑）
@@ -89,85 +96,42 @@ class LLMService:
             logger.warning(f"无法解析 JSON: {clean_answer[:50]}...")
             return clean_answer.strip()
 
-    def _call_custom_api(self, token: str, inputs: Dict[str, Any]) -> str:
-        headers = {
-            "Authorization": f"Bearer {token}", "Content-Type": "application/json",
-            "Accept": "text/event-stream", "Cache-Control": "no-cache", "Connection": "keep-alive"
-        }
-        payload = { "inputs": inputs, "query": "执行任务", "conversation_id": "", "user": self.user_id }
-        
-        try:
-            response = requests.post(self.api_url, headers=headers, json=payload, stream=True, timeout=300)
-            response.raise_for_status()
-            
-            last_answer = self._extract_answer_from_stream(response)
-            
-            if not last_answer:
-                 logger.warning("未从 API 响应中提取到有效 answer")
-                 return list(inputs.values())[0] if inputs else "[ERROR]"
-                 
-            return self._clean_and_parse_answer(last_answer, inputs)
-                
-        except Exception as e:
-            logger.error(f"API 调用失败: {e}")
-            return list(inputs.values())[0] if inputs else "[ERROR]"
     def generate_spvSubjectType(self, element_value: str) -> str:
-        """
-        生成 spvSubjectType 的泛化数据
-        """
-        token = self.tokens["spvSubjectType"]
+        """生成 spvSubjectType 的泛化数据"""
         inputs = {"spvSubjectType": element_value}
-        return self._call_custom_api(token, inputs)
+        messages = spv_subject_type.get_messages(inputs)
+        return self._call_deepseek_api(messages, fallback_val=element_value)
 
     def generate_prdInvestmentScope(self, element_value: str) -> str:
-        """
-        生成 prdInvestmentScope 的泛化数据
-        """
-        token = self.tokens["prdInvestmentScope"]
+        """生成 prdInvestmentScope 的泛化数据"""
         inputs = {"prdInvestmentScope": element_value}
-        return self._call_custom_api(token, inputs)
+        messages = prd_investment_scope.get_messages(inputs)
+        return self._call_deepseek_api(messages, fallback_val=element_value)
 
     def generate_spvInvestmentScope(self, element_value: str) -> str:
-        """
-        生成 spvInvestmentScope 的泛化数据
-        """
-        token = self.tokens["spvInvestmentScope"]
+        """生成 spvInvestmentScope 的泛化数据"""
         inputs = {"spvInvestmentScope": element_value}
-        return self._call_custom_api(token, inputs)
+        messages = spv_investment_scope.get_messages(inputs)
+        return self._call_deepseek_api(messages, fallback_val=element_value)
 
     def generate_adversarial_data(self, element_value: str) -> str:
-        """
-        生成对抗攻击数据
-        """
-        token = self.tokens["adversarial"]
-        inputs = {"content": element_value} # 假设对抗接口接收 content 变量
-        return self._call_custom_api(token, inputs)
+        """生成对抗攻击数据"""
+        inputs = {"content": element_value}
+        messages = adversarial.get_messages(inputs)
+        return self._call_deepseek_api(messages, fallback_val=element_value)
 
     def generate_ckxy(self, business_process: str) -> str:
-        """
-        生成存款协议 (ckxy) 数据
-        根据传入的业务流程(business_process)调用大模型进行生成
-        """
-        token = self.tokens["ckxy"]
+        """生成存款协议 (ckxy) 数据"""
         inputs = {"business_process": business_process} 
-        return self._call_custom_api(token, inputs)
+        messages = ckxy.get_messages(inputs)
+        return self._call_deepseek_api(messages, fallback_val="[ERROR] Failed to generate content.")
 
-    def generate_jktzs(self, **kwargs) -> str:
-        """
-        生成缴款通知书 (jktzs) 测试集的泛化数据
-        通过 **kwargs 动态接收 Excel 测试集中的所有变量字段（如 zqmc, zqdm_1 等）
-        """
-        token = self.tokens["jktzs"]
-        # 直接将所有传入的变量组装成字典传给大模型网关
-        inputs = kwargs
-        return self._call_custom_api(token, inputs)
+    def generate_jktzs(self, **kwargs) -> Any:
+        """生成缴款通知书 (jktzs) 测试集的泛化数据"""
+        messages = jktzs.get_messages(kwargs)
+        return self._call_deepseek_api(messages, fallback_val=kwargs)
 
-    def generate_jktzs_adversarial(self, **kwargs) -> str:
-        """
-        生成缴款通知书 (jktzs_adversarial) 测试集的对抗攻击数据
-        通过 **kwargs 动态接收 Excel 测试集中的所有变量字段
-        """
-        token = self.tokens["jktzs_adversarial"]
-        inputs = kwargs
-        return self._call_custom_api(token, inputs)
-
+    def generate_jktzs_adversarial(self, **kwargs) -> Any:
+        """生成缴款通知书 (jktzs_adversarial) 测试集的对抗攻击数据"""
+        messages = jktzs_adversarial.get_messages(kwargs)
+        return self._call_deepseek_api(messages, fallback_val=kwargs)

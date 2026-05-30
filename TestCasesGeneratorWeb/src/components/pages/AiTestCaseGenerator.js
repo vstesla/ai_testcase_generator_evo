@@ -310,7 +310,12 @@ const MainPage = () => {
 
             // 保存历史记录，将新结果添加到已有结果的前面
             setGeneratedResults(prevResults => [newResult, ...prevResults]);
-            message.success('生成任务已成功完成！');
+            message.success('生成任务已提交，后台处理中！');
+
+            // 如果是处理中状态，开始轮询生成结果
+            if (newResult.TestCaseGenStatus === 'Processing' || newResult.TestCaseGenStatus === 'P') {
+                pollGenerationResult(newResult.TestCaseID);
+            }
 
             // 如果开启了比对评测，自动轮询获取比对结果
             if (comparisonEnabled && result.TestCaseID) {
@@ -320,6 +325,55 @@ const MainPage = () => {
             message.error(error.message || '生成失败，请检查网络或后端服务');
         } finally {
             setLoading(false);
+        }
+    };
+
+    // 轮询获取生成结果
+    const pollGenerationResult = async (testCaseId, retryCount = 0) => {
+        const MAX_RETRIES = 120; // 最大重试次数
+        const RETRY_INTERVAL = 5000; // 重试间隔(ms)
+
+        try {
+            const response = await AiTestCaseGeneratorService.getGenerationResult(testCaseId);
+            if (response && response.code === 200 && response.data) {
+                const record = response.data;
+                const status = record.status;
+                
+                if (status === 'Y' || status === 'N') {
+                    // 更新列表中的状态
+                    setGeneratedResults(prev => prev.map(item => {
+                        if (item.TestCaseID === testCaseId) {
+                            let downloadUrl = item.DownloadUrl;
+                            if (record.attachments && record.attachments.length > 0) {
+                                downloadUrl = record.attachments.map(att => att.download_url).filter(Boolean).join(';');
+                            }
+                            return {
+                                ...item,
+                                TestCaseGenStatus: status,
+                                Message: record.message,
+                                DownloadUrl: downloadUrl
+                            };
+                        }
+                        return item;
+                    }));
+                    
+                    if (status === 'Y') {
+                        message.success(`案例集 ${testCaseId} 生成成功！`);
+                    } else {
+                        message.error(`案例集 ${testCaseId} 生成失败：${record.message}`);
+                    }
+                } else if (retryCount < MAX_RETRIES) {
+                    setTimeout(() => {
+                        pollGenerationResult(testCaseId, retryCount + 1);
+                    }, RETRY_INTERVAL);
+                }
+            }
+        } catch (error) {
+            if (retryCount < MAX_RETRIES) {
+                setTimeout(() => {
+                    pollGenerationResult(testCaseId, retryCount + 1);
+                }, RETRY_INTERVAL);
+            }
         }
     };
 
@@ -369,16 +423,21 @@ const MainPage = () => {
         try {
             message.loading({ content: '正在下载文件...', key: 'download' });
 
-            // 调用下载接口获取二进制流（blob）
-            const blob = await AiTestCaseGeneratorService.downloadAttachments({
+            // 调用下载接口获取二进制流（blob）和文件名
+            const result = await AiTestCaseGeneratorService.downloadAttachments({
                 test_case_id: record.TestCaseID,
                 file_type: record.file_type || '',
                 file_sub_type: record.file_sub_type || ''
             });
 
-            // 判断文件后缀：如果功能是测试集泛化，固定为 .xlsx；否则后端会自动处理为 zip 或 pdf
-            const extension = record.businessProcess === '测试集泛化' ? '.xlsx' : '.zip';
-            const filename = `${record.TestCaseID}${extension}`;
+            const blob = result.blob || result; // 兼容旧逻辑
+            let filename = result.filename;
+            
+            if (!filename) {
+                // 判断文件后缀：如果功能是测试集泛化，固定为 .xlsx；否则后端会自动处理为 zip 或 pdf
+                const extension = record.businessProcess === '测试集泛化' ? '.xlsx' : '.zip';
+                filename = `${record.TestCaseID}${extension}`;
+            }
 
             // 创建下载链接并触发下载
             const blobUrl = URL.createObjectURL(blob);
@@ -836,14 +895,23 @@ const MainPage = () => {
             dataIndex: 'TestCaseGenStatus',
             key: 'TestCaseGenStatus',
             width: 120,
-            render: (status) => (
-                <span style={{
-                    color: status === 'Y' ? '#52c41a' : '#ff4d4f',
-                    fontWeight: 'bold'
-                }}>
-                    {status === 'Y' ? '生成成功' : '生成失败'}
-                </span>
-            ),
+            render: (status) => {
+                let color = '#ff4d4f';
+                let text = '生成失败';
+                if (status === 'Y') {
+                    color = '#52c41a';
+                    text = '生成成功';
+                } else if (status === 'Processing' || status === 'P') {
+                    color = '#1890ff';
+                    text = '处理中';
+                }
+                return (
+                    <span style={{ color, fontWeight: 'bold' }}>
+                        {text}
+                        {(status === 'Processing' || status === 'P') && <SyncOutlined spin style={{ marginLeft: 5 }} />}
+                    </span>
+                );
+            },
         },
         {
             title: '消息提示',

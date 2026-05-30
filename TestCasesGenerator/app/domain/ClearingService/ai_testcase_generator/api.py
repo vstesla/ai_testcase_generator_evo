@@ -54,6 +54,18 @@ def _record_generation_result(result: dict):
                 logger.error("Failed to insert record into ai_testcase_generate_record table")
             else:
                 logger.info(f"Successfully inserted record: {result['TestCaseID']}")
+        else:
+            # 已存在，执行更新操作
+            update_data = {
+                "status": result["TestCaseGenStatus"],
+                "message": result["Message"],
+                "update_time": datetime.now()
+            }
+            if "is_comparison_done" in result:
+                update_data["is_comparison_done"] = result["is_comparison_done"]
+            
+            DB.update("ai_testcase_generate_record", update_data, {"test_case_id": result["TestCaseID"]})
+            logger.info(f"Successfully updated record: {result['TestCaseID']}")
         
         if "Attachments" in result:
             for att in result["Attachments"]:
@@ -91,8 +103,8 @@ async def generate(
         FILE_SOURCE = "tuoguan1"
         SKILL_DESCRIPTION = "ai_testcase_generator"
         FILE_PATH_IDENTIFIER = f"{date_str}_{timestamp}"  # 对应 DB 的 file_path 列
-        USER_ID = "IT703434"
-        USER_NAME = "梁金伟"
+        USER_ID = "ADMIN"
+        USER_NAME = "Victor"
 
         # 构造 COS 存储路径
         # 格式: tuoguan1/ai_testcase_generator/YYYY-MM-DD_TIMESTAMP/filename
@@ -207,8 +219,22 @@ async def generate_attachments(
         with open(temp_jktzs_template_path, "wb") as buffer:
             shutil.copyfileobj(jktzs_template.file, buffer)
 
-        # 调用 Service 层执行具体的 PDF 渲染、合并单元格及 COS 上传逻辑
-        result = await process_service.process_jktzs_attachment(
+        # 引入 Celery 任务分发大批量生成
+        from app.domain.ClearingService.ai_testcase_generator.tasks import generate_attachments_task
+        
+        test_case_id = f"TC_JKTZS_{date_str.replace('-', '')}{str(timestamp)[-6:]}"
+
+        # 先向数据库写入一条 "处理中" 的记录
+        initial_result = {
+            "TestCaseID": test_case_id,
+            "TestCaseGenStatus": "P",  # P 代表 Processing
+            "Message": "任务已提交后台队列，正在处理中...",
+            "is_comparison_done": False
+        }
+        _record_generation_result(initial_result)
+
+        # 异步分发任务
+        generate_attachments_task.delay(
             business_process=business_process,
             jktzs_file_path=temp_jktzs_file_path,
             jktzs_template_path=temp_jktzs_template_path,
@@ -217,30 +243,31 @@ async def generate_attachments(
             enable_adversarial=enable_adversarial,
             file_path_identifier=FILE_PATH_IDENTIFIER,
             timestamp=timestamp,
-            enable_comparison=enable_comparison
+            enable_comparison=enable_comparison,
+            test_case_id_batch=test_case_id  # 传入同一个 test_case_id
         )
         
-        # 为了兼容统一落库逻辑，提取所需变量
-        attachments = result.get("Attachments", [])
-        test_case_id_batch = result.get("test_case_id_batch", "")
-
-        # === 结果落库 ===
-        # 抽取公共落库逻辑，统一插入 ai_testcase_generate_record 和 ai_testcase_generate_attachments 表
-        _record_generation_result(result)
-
-        return result
+        # 立即返回，不阻塞
+        return GenerateResponse(
+            TestCaseID=test_case_id,
+            TestCaseGenStatus="P",
+            Message="任务已提交后台队列，正在处理中...",
+            DownloadUrl="",
+            Attachments=[]
+        )
 
     except Exception as e:
         logger.error(f"JKTZS Processing failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        # 清理临时文件
+        # 如果出错了，尝试清理临时文件
         for path in [temp_jktzs_file_path, temp_jktzs_template_path]:
             if path and os.path.exists(path):
                 try:
                     os.remove(path)
                 except OSError:
                     pass
+        raise HTTPException(status_code=500, detail=str(e))
+    # 注意：这里去掉了 finally 里的清理临时文件逻辑，
+    # 因为 Celery 工作进程还需要读取这俩文件。文件清理应该放在任务内部或后续步骤。
 
 @router.get("/download_files")
 async def download_files(

@@ -4,10 +4,15 @@ import logging
 import os
 import time
 import re
+import urllib3
 from io import BytesIO
 from typing import List, Dict, Any, Tuple
 from app.common.cos import ObjectStorage
 from app.common.db.db_utils import db_utils
+
+# 禁用 urllib3 的 InsecureRequestWarning，防止控制台打印大量警告
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 from app.domain.ClearingService.ai_testcase_generator.llm_service import LLMService
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
@@ -62,8 +67,8 @@ class ProcessService:
         # 固定配置
         self.FILE_SOURCE = "tuoguan1"
         self.SKILL_DESCRIPTION = "ai_testcase_generator"
-        self.USER_ID = "IT703434"
-        self.USER_NAME = "梁金伟"
+        self.USER_ID = "ADMIN"
+        self.USER_NAME = "Victor"
         # 定义路径配置
         CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
         self.TEMP_DIR = os.path.join(CURRENT_DIR, "Temp")
@@ -135,6 +140,7 @@ class ProcessService:
         # 临时目录
         os.makedirs(self.TEMP_DIR, exist_ok=True)
         local_original_path = os.path.join(self.TEMP_DIR, f"download_{os.path.basename(cos_path)}")
+        output_path = None
         
         try:
             # Step 1: 下载原始文件
@@ -194,6 +200,9 @@ class ProcessService:
             # 清理临时文件
             if os.path.exists(local_original_path):
                 try: os.remove(local_original_path) 
+                except OSError: pass
+            if output_path and os.path.exists(output_path):
+                try: os.remove(output_path)
                 except OSError: pass
 
     async def _parse_split_and_upload(self, local_path: str, file_path_identifier: str) -> Dict[str, str]:
@@ -428,7 +437,14 @@ class ProcessService:
                         escaped_line = re.sub(r'\*\*(.+?)\*\*', r'<font name="MicrosoftYaHei-Bold">\1</font>', escaped_line)
 
                         # 英文/数字使用 TimesNewRoman 字体
-                        escaped_line = re.sub(r'([a-zA-Z0-9\-\.\/:,_@]+)', r'<font name="TimesNewRoman">\1</font>', escaped_line)
+                        escaped_line = re.sub(REGEX_ENGLISH_NUM, FONT_TEMPLATE_ENGLISH, escaped_line)
+                        
+                        # 修复 XML 标签嵌套问题，防止 ReportLab 崩溃
+                        try:
+                            Paragraph(escaped_line, style_normal)
+                        except Exception:
+                            # 如果遇到无法解析的非法闭合（如对抗攻击注入的特殊字符），剥离 XML 标签
+                            escaped_line = re.sub(r'<[^>]+>', '', escaped_line)
 
                         p = Paragraph(escaped_line, style_normal)
                         paragraphs.append(p)
@@ -500,7 +516,20 @@ class ProcessService:
         """
         if not df_list: return
         import pandas as pd
+        import re
+        
         temp_df = pd.DataFrame(df_list)
+        
+        # 清理非法控制字符，防止 openpyxl 抛出 IllegalCharacterError
+        illegal_chars_re = re.compile(r'[\000-\010]|[\013-\014]|[\016-\037]')
+        def clean_excel_data(val):
+            if isinstance(val, str):
+                return illegal_chars_re.sub('', val)
+            return val
+            
+        for col in temp_df.columns:
+            temp_df[col] = temp_df[col].apply(clean_excel_data)
+
         filename = f"{prefix}_jktzs_temp_{timestamp}.xlsx" if prefix else f"jktzs_temp_{timestamp}.xlsx"
         local_path = os.path.join(self.TEMP_DIR, filename)
         temp_df.to_excel(local_path, index=False)
@@ -511,6 +540,10 @@ class ProcessService:
                 await self._safe_upload_file(local_path, cos_path, self.USER_ID, self.USER_NAME)
             except Exception as e:
                 logger.error(f"Intermediate upload failed: {e}")
+            finally:
+                if os.path.exists(local_path):
+                    try: os.remove(local_path)
+                    except OSError: pass
         asyncio.create_task(_upload_task())
 
     async def _do_jktzs_generalization(self, test_audit_id, raw_data, current_data):
@@ -743,7 +776,11 @@ class ProcessService:
         from reportlab.platypus import Paragraph, Spacer
         from reportlab.lib.units import cm
         import re
-        for key, val in data.items():
+        
+        # 按照键名长度降序排序，优先替换长变量名，防止变量名冲突
+        sorted_keys = sorted(data.keys(), key=len, reverse=True)
+        for key in sorted_keys:
+            val = data[key]
             p_text = p_text.replace(f"${key}$", str(val))
             original_key = key.replace('_', '/')
             p_text = p_text.replace(f"${original_key}$", str(val))
@@ -778,10 +815,15 @@ class ProcessService:
         from reportlab.platypus import Paragraph
         import re
         processed_table_data = []
+        
+        # 按照键名长度降序排序，优先替换长变量名
+        sorted_keys = sorted(data.keys(), key=len, reverse=True)
+        
         for row in table_data:
             processed_row = []
             for cell_text in row:
-                for key, val in data.items():
+                for key in sorted_keys:
+                    val = data[key]
                     cell_text = cell_text.replace(f"${key}$", str(val))
                     original_key = key.replace('_', '/')
                     cell_text = cell_text.replace(f"${original_key}$", str(val))
@@ -796,6 +838,13 @@ class ProcessService:
                         line = "<font color='white'>.</font>"
                     else:
                         line = re.sub(REGEX_ENGLISH_NUM, FONT_TEMPLATE_ENGLISH, line)
+                        
+                        # 【防御性编程】防止由于对抗攻击注入导致非法 XML 标签，从而引发 Paragraph 解析异常
+                        try:
+                            Paragraph(line, style_table_cell)
+                        except Exception:
+                            # 剥离可能破坏 ReportLab 结构的非法 XML 标签
+                            line = re.sub(r'<[^>]+>', '', line)
 
                     # 针对表格内的特定行文本强制居中并使用粗体
                     if line_stripped.replace(" ", "") in ["重要提示", "认购信息"]:
@@ -861,29 +910,36 @@ class ProcessService:
         from reportlab.lib.units import cm
         pdf_filename = f"TC_{business_process}_{idx+1}_{time_str_batch}.pdf"
         local_pdf_path = os.path.join(self.OUTPUT_DIR, pdf_filename)
-        doc = SimpleDocTemplate(local_pdf_path, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+        
+        try:
+            doc = SimpleDocTemplate(local_pdf_path, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
 
-        pdf_paragraphs = self._render_paragraphs_and_tables(data, paragraphs_template, tables_template, tables_col_widths, styles_tuple)
-        doc.build(pdf_paragraphs)
+            pdf_paragraphs = self._render_paragraphs_and_tables(data, paragraphs_template, tables_template, tables_col_widths, styles_tuple)
+            doc.build(pdf_paragraphs)
 
-        cos_path = f"{self.FILE_SOURCE}/{self.SKILL_DESCRIPTION}/{file_path_identifier}/jktzs/{pdf_filename}"
-        file_id = await self._safe_upload_file(local_pdf_path, cos_path, self.USER_ID, self.USER_NAME)
-        download_url = self.object_storage.generate_download_url(file_id)
+            cos_path = f"{self.FILE_SOURCE}/{self.SKILL_DESCRIPTION}/{file_path_identifier}/jktzs/{pdf_filename}"
+            file_id = await self._safe_upload_file(local_pdf_path, cos_path, self.USER_ID, self.USER_NAME)
+            download_url = self.object_storage.generate_download_url(file_id)
 
-        return {
-            "file_id": file_id, "audit_id": test_case_id, "data": data, "local_path": local_pdf_path,
-            "download_url": download_url, "filename": pdf_filename, "business_process": business_process,
-            "template_filename": os.path.basename(jktzs_template_path)
-        }
+            return {
+                "file_id": file_id, "audit_id": test_case_id, "data": data, "local_path": local_pdf_path,
+                "download_url": download_url, "filename": pdf_filename, "business_process": business_process,
+                "template_filename": os.path.basename(jktzs_template_path)
+            }
+        finally:
+            if os.path.exists(local_pdf_path):
+                try: os.remove(local_pdf_path)
+                except OSError: pass
 
-    async def _render_jktzs_pdfs(self, processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path):
+    async def _render_jktzs_pdfs(self, processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path, test_case_id_batch=None):
         """
         批量循环处理测试数据，生成指定数量的缴款通知书 PDF 文件。
         """
         os.makedirs(self.OUTPUT_DIR, exist_ok=True)
         download_urls, attachments, generated_file_info = [], [], []
         time_str_batch = datetime.now().strftime("%Y%m%d%H%M%S")
-        test_case_id_batch = f"TC_JKTZS_{time_str_batch}"
+        if not test_case_id_batch:
+            test_case_id_batch = f"TC_JKTZS_{time_str_batch}"
         
         audit_ids = list(processed_data_map.keys())
         if len(audit_ids) == 0: raise ValueError("没有解析到有效的测试集数据")
@@ -917,12 +973,16 @@ class ProcessService:
         "skzh": "收款账户",
         "hkbz": "汇款备注",
         "cpmc": "产品名称",
+        "IssuerName": "发行人名称",
+        "IssuerShort": "发行人简称",
+        "PayeeShort": "收款人简称"
     }
 
     async def process_jktzs_attachment(
         self, business_process: str, jktzs_file_path: str, jktzs_template_path: str,
         file_count: int, enable_generalization: bool, enable_adversarial: bool,
-        file_path_identifier: str, timestamp: int, enable_comparison: bool = True
+        file_path_identifier: str, timestamp: int, enable_comparison: bool = True,
+        test_case_id_batch: str = None
     ) -> Dict[str, Any]:
         """
         处理缴款通知书附件生成的总入口函数：
@@ -940,20 +1000,20 @@ class ProcessService:
         paragraphs_template, tables_template, tables_col_widths = self._parse_docx_template(jktzs_template_path)
         
         # 3. 循环填充数据，生成多份 PDF 文件并上传 COS
-        download_urls, attachments, generated_file_info, test_case_id_batch = await self._render_jktzs_pdfs(
-            processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path
+        download_urls, attachments, generated_file_info, final_test_case_id = await self._render_jktzs_pdfs(
+            processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path, test_case_id_batch
         )
         
         # 4. 若开启对比开关，则触发后台异步轮询评测任务
         if enable_comparison:
             import asyncio
-            asyncio.create_task(self._parse_and_evaluate(test_case_id_batch, generated_file_info))
+            asyncio.create_task(self._parse_and_evaluate(final_test_case_id, generated_file_info))
             is_comparison_done = False
         else:
             is_comparison_done = True
             
         return {
-            "TestCaseID": test_case_id_batch,
+            "TestCaseID": final_test_case_id,
             "TestCaseGenStatus": "Y" if download_urls else "N",
             "Message": f"Successfully generated {len(download_urls)} JKTZS PDFs.",
             "DownloadUrl": ";".join(download_urls),
@@ -1081,22 +1141,22 @@ class ProcessService:
         如果返回 message 包含 "[10005]调用识别模型接口错误"，则说明服务没打开，返回 False。
         否则认为服务已开启，返回 True。
         """
-        import httpx
-        url = "http://ocr-external.paasuat.cmbchina.cn/cv/ocr"
-        payload = {
-            "channelCode": "882710489925676032",
-            "type": "t2c",
-            "imageType": "png",
-            "image": "iVBORw0KGgoAAAANSUhEUgAAAIgAAAAkCAIAAADdBuWQAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAJaklEQVRoge2aeUwT3xbHpyxFxEplEUgLSBo2USTBwB+CUQJhUyDumkjQECSBBEJCQBAJxmhRDLIpRCCGRESbALZAgYgIKjWmLEKFIMhaaJGGQksLlM7M++O+N5nXQi3F93v9o5+/bs+cc5c5c793AQKKopAW9Pb2+vr6auNp4K9g9P/ugIGtMSRGTzEkRk8xJEZPMSRGTzEkRk8xJEZPMSRGTzEkRk8xJEZPMent7dXGb2RkxHAl809C0PKuzMA/jEHK9BRDYvSUXSWGw+HIZLLx8fG8vLylpSXNzgqFYmJiQt3+5csXpVK5ZQiTyeTxeCrGurq61dVV3TqsG2KxuLOzU4fAlpYWBEF0a1SXNYbP53d0dLx+/bqrqysxMTEpKenYsWNDQ0Pj4+NCofD69esEAkE9SiaTWVtbFxQUqNizs7Pz8/MTExNV7DAMe3l5+fj41NXVQRC0uLhoa2s7Nzfn4uJSWFiYlJQEQdDq6qqxsbG5uflOhwDo6+tjMpn79+8nEonAgiDI0tKShYUFvs76+vrR0dE3b94EBAQsLCyUl5eTSCQsBIIgqVRqYWFhZPRfX/n8/PyLFy9SUlLu3LmjQ992kJjJyclv376JRCIIgm7fvv358+cjR44YGRkJBAIvLy8wY65cucLn85ubmy0tLVXCFQqFmZmZenNUKpXL5drb26vYi4uL7969m52dbW5uvrGxkZ+f//z5cw6H09HRERcXZ2xsDEFQfX29paUlg8EwMTHRYfAIgkgkEjKZjFn6+/tPnDjR39/v7u6+XdTKyorK6Pz8/Pz8/IqLi1VysytQnbC2thaLxaC8vLxMIpFAWSwWOzg4sNnsLaMgCCpRg0wmCwQCFc/BwcHAwECRSFRbW5uVlQWMvb29ly9fhmH4yZMndDr9j51sbW11cnIKDAzUflzV1dVFRUV4y8bGhuYQuVzu7e0tl8u1b0Ub/"
-        }
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(url, json=payload)
-                data = response.json()
-                message = data.get("message", "")
-                if "[10005]调用识别模型接口错误" in message:
-                    return False
-                return True
+            import requests
+            import asyncio
+            url = "http://ocr-external.paasuat.cmbchina.cn/cv/ocr"
+            payload = {
+                "channelCode": "882710489925676032",
+                "type": "t2c",
+                "imageType": "png",
+                "image": "iVBORw0KGgoAAAANSUhEUgAAAIgAAAAkCAIAAADdBuWQAAAACXBIWXMAAA7EAAAOxAGVKw4bAAAJaklEQVRoge2aeUwT3xbHpyxFxEplEUgLSBo2USTBwB+CUQJhUyDumkjQECSBBEJCQBAJxmhRDLIpRCCGRESbALZAgYgIKjWmLEKFIMhaaJGGQksLlM7M++O+N5nXQi3F93v9o5+/bs+cc5c5c793AQKKopAW9Pb2+vr6auNp4K9g9P/ugIGtMSRGTzEkRk8xJEZPMSRGTzEkRk8xJEZPMSRGTzEkRk8xJEZPMent7dXGb2RkxHAl809C0PKuzMA/jEHK9BRDYvSUXSWGw+HIZLLx8fG8vLylpSXNzgqFYmJiQt3+5csXpVK5ZQiTyeTxeCrGurq61dVV3TqsG2KxuLOzU4fAlpYWBEF0a1SXNYbP53d0dLx+/bqrqysxMTEpKenYsWNDQ0Pj4+NCofD69esEAkE9SiaTWVtbFxQUqNizs7Pz8/MTExNV7DAMe3l5+fj41NXVQRC0uLhoa2s7Nzfn4uJSWFiYlJQEQdDq6qqxsbG5uflOhwDo6+tjMpn79+8nEonAgiDI0tKShYUFvs76+vrR0dE3b94EBAQsLCyUl5eTSCQsBIIgqVRqYWFhZPRfX/n8/PyLFy9SUlLu3LmjQ992kJjJyclv376JRCIIgm7fvv358+cjR44YGRkJBAIvLy8wY65cucLn85ubmy0tLVXCFQqFmZmZenNUKpXL5drb26vYi4uL7969m52dbW5uvrGxkZ+f//z5cw6H09HRERcXZ2xsDEFQfX29paUlg8EwMTHRYfAIgkgkEjKZjFn6+/tPnDjR39/v7u6+XdTKyorK6Pz8/Pz8/IqLi1VysytQnbC2thaLxaC8vLxMIpFAWSwWOzg4sNnsLaMgCCpRg0wmCwQCFc/BwcHAwECRSFRbW5uVlQWMvb29ly9fhmH4yZMndDr9j51sbW11cnIKDAzUflzV1dVFRUV4y8bGhuYQuVzu7e0tl8u1b0Ub/"
+            }
+            response = await asyncio.to_thread(requests.post, url, json=payload, timeout=10.0)
+            data = response.json()
+            message = data.get("message", "")
+            if "[10005]调用识别模型接口错误" in message:
+                return False
+            return True
         except Exception as e:
             logger.error(f"Failed to check OCR status: {e}")
             return False

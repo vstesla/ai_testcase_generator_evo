@@ -395,7 +395,7 @@ def create_tyystool_connection():
 
     # 使用默认配置创建连接池
     pool = ConnectionPool(
-        host="localhost",
+        host="127.0.0.1",
         port=3306,
         user="root",
         password="",
