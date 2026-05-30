@@ -13,7 +13,12 @@
 ### 1.1 智能测试用例生成模块 (`ai_testcase_generator`)
 - **路径**: [`app/teams/tuoguan_group1/ai_testcase_generator`](./app/teams/tuoguan_group1/ai_testcase_generator/)
 - **功能简介**:
-  该模块对接内部 AI Agent 服务，提供测试数据集的自动泛化、对抗样本生成能力。同时支持基于大模型的指令附件（如存款协议、缴款通知书）的动态生成与 PDF 排版渲染，并内置了与“解析小助”对接的比对评测能力。
+  该模块对接内部 AI Agent 服务，提供测试数据集的自动泛化、对抗样本生成能力。同时支持基于大模型的指令附件（如存款协议、缴款通知书、标的合同）的动态生成与排版渲染，并内置了与“解析小助”对接的比对评测能力。
+- **最新特性**:
+  - 新增支持“标的合同” (`ZLFJ_BDHT`) 业务场景的自动生成及评测白名单比对。
+  - 增强了 LLM 输出结果的清洗与解析能力，支持复杂多键值对 JSON 字典的精准回显。
+  - 重构了通用文件流生成逻辑，附件下载不再局限于 PDF，动态支持各类文件扩展名。
+  - 新增 `/generation_history` 和 `/generation_result` 接口，支持多维度分页历史查询。
 - **文档链接**: [智能测试用例生成接口文档](./app/teams/tuoguan_group1/ai_testcase_generator/README.md)
 
 ### 1.2 事中规则自动化测试模块 (`in_flight_rules_automation_tools`)
