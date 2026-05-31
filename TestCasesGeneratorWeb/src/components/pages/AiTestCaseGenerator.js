@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { message, Upload, Button, Switch, Table, Input, Select, DatePicker, Space, InputNumber, Modal, Tooltip, Badge } from 'antd';
 import { UploadOutlined, SearchOutlined, FilterOutlined, DownloadOutlined, EyeOutlined, SyncOutlined } from '@ant-design/icons';
 import * as XLSX from 'xlsx';
@@ -8,18 +8,33 @@ import './AiTestCaseGenerator.css';
 
 // 日期工具函数 - 替代moment功能
 const dateUtils = {
+    normalizeToDate: (value) => {
+        if (!value) return null;
+        if (value instanceof Date) {
+            return isNaN(value.getTime()) ? null : value;
+        }
+        if (typeof value?.toDate === 'function') {
+            const converted = value.toDate();
+            return converted instanceof Date && !isNaN(converted.getTime()) ? converted : null;
+        }
+        if (typeof value === 'string') {
+            return dateUtils.parseDate(value);
+        }
+        return null;
+    },
     // 格式化日期为 YYYY-MM-DD HH:mm:ss
     formatDate: (date, format = 'YYYY-MM-DD HH:mm:ss') => {
-        if (!date || !(date instanceof Date) || isNaN(date.getTime())) {
+        const normalizedDate = dateUtils.normalizeToDate(date);
+        if (!normalizedDate) {
             return '';
         }
 
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
-        const day = String(date.getDate()).padStart(2, '0');
-        const hours = String(date.getHours()).padStart(2, '0');
-        const minutes = String(date.getMinutes()).padStart(2, '0');
-        const seconds = String(date.getSeconds()).padStart(2, '0');
+        const year = normalizedDate.getFullYear();
+        const month = String(normalizedDate.getMonth() + 1).padStart(2, '0');
+        const day = String(normalizedDate.getDate()).padStart(2, '0');
+        const hours = String(normalizedDate.getHours()).padStart(2, '0');
+        const minutes = String(normalizedDate.getMinutes()).padStart(2, '0');
+        const seconds = String(normalizedDate.getSeconds()).padStart(2, '0');
 
         return format
             .replace('YYYY', year)
@@ -34,17 +49,33 @@ const dateUtils = {
     parseDate: (dateString) => {
         if (!dateString) return null;
 
-        // 尝试多种格式解析
-        const date = new Date(dateString);
-        if (!isNaN(date.getTime())) {
-            return date;
+        if (dateString instanceof Date) {
+            return isNaN(dateString.getTime()) ? null : dateString;
         }
 
-        // 尝试处理 YYYY-MM-DD HH:mm:ss 格式
-        const isoString = dateString.replace(' ', 'T') + 'Z';
-        const isoDate = new Date(isoString);
-        if (!isNaN(isoDate.getTime())) {
-            return isoDate;
+        if (typeof dateString?.toDate === 'function') {
+            const converted = dateString.toDate();
+            return isNaN(converted.getTime()) ? null : converted;
+        }
+
+        const value = String(dateString).trim();
+
+        const localDateMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (localDateMatch) {
+            const [, year, month, day, hours = '00', minutes = '00', seconds = '00'] = localDateMatch;
+            return new Date(
+                Number(year),
+                Number(month) - 1,
+                Number(day),
+                Number(hours),
+                Number(minutes),
+                Number(seconds)
+            );
+        }
+
+        const date = new Date(value);
+        if (!isNaN(date.getTime())) {
+            return date;
         }
 
         return null;
@@ -52,14 +83,16 @@ const dateUtils = {
 
     // 获取当天的开始时间（00:00:00）
     startOfDay: (date = new Date()) => {
-        const newDate = new Date(date);
+        const normalizedDate = dateUtils.normalizeToDate(date);
+        const newDate = normalizedDate ? new Date(normalizedDate) : new Date();
         newDate.setHours(0, 0, 0, 0);
         return newDate;
     },
 
     // 添加天数
     addDays: (date, days) => {
-        const newDate = new Date(date);
+        const normalizedDate = dateUtils.normalizeToDate(date);
+        const newDate = normalizedDate ? new Date(normalizedDate) : new Date();
         newDate.setDate(newDate.getDate() + days);
         return newDate;
     },
@@ -85,8 +118,18 @@ const dateUtils = {
 
     // 检查是否为有效日期
     isValidDate: (date) => {
-        return date instanceof Date && !isNaN(date.getTime());
+        const normalizedDate = dateUtils.normalizeToDate(date);
+        return normalizedDate instanceof Date && !isNaN(normalizedDate.getTime());
     }
+};
+
+const buildComparisonResultKey = (item) => {
+    return [
+        item.TestCaseID,
+        item.file_type || '',
+        item.file_sub_type || '',
+        item.element_key || ''
+    ].join('__');
 };
 
 // 需要上传测试集和模板文件的业务流程
@@ -157,6 +200,90 @@ const MainPage = () => {
     // OCR服务状态
     const [ocrStatus, setOcrStatus] = useState(false);
     const [ocrLoading, setOcrLoading] = useState(false);
+    const generationPollTimersRef = useRef({});
+    const comparisonPollTimersRef = useRef({});
+    const generationPollingActiveRef = useRef({});
+    const generationPollingInFlightRef = useRef({});
+    const comparisonPollingActiveRef = useRef({});
+    const comparisonPollingInFlightRef = useRef({});
+
+    const clearGenerationPoll = (testCaseId) => {
+        const timer = generationPollTimersRef.current[testCaseId];
+        if (timer) {
+            clearTimeout(timer);
+        }
+        delete generationPollTimersRef.current[testCaseId];
+        delete generationPollingActiveRef.current[testCaseId];
+        delete generationPollingInFlightRef.current[testCaseId];
+    };
+
+    const clearComparisonPoll = (testCaseId) => {
+        const timer = comparisonPollTimersRef.current[testCaseId];
+        if (timer) {
+            clearTimeout(timer);
+        }
+        delete comparisonPollTimersRef.current[testCaseId];
+        delete comparisonPollingActiveRef.current[testCaseId];
+        delete comparisonPollingInFlightRef.current[testCaseId];
+    };
+
+    const mergeComparisonResults = (prev, incoming) => {
+        const resultMap = new Map();
+        [...prev, ...incoming].forEach((item) => {
+            resultMap.set(buildComparisonResultKey(item), item);
+        });
+        return Array.from(resultMap.values());
+    };
+
+    const getComparisonStatusMeta = (record) => {
+        if (record.TestCaseGenStatus === 'P' || record.TestCaseGenStatus === 'Processing') {
+            return { text: '处理中', color: '#1890ff' };
+        }
+        if (record.TestCaseGenStatus === 'N') {
+            return { text: '已失败', color: '#ff4d4f' };
+        }
+        if (record.isComparisonDone) {
+            return { text: '已完成', color: '#52c41a' };
+        }
+        return { text: '比对中', color: '#faad14' };
+    };
+
+    const getRecordActivityTime = (record) => {
+        return dateUtils.parseDate(record?.updateTime || record?.createTime);
+    };
+
+    const shouldAutoResumeGenerationPoll = (record) => {
+        if (!(record.TestCaseGenStatus === 'P' || record.TestCaseGenStatus === 'Processing')) {
+            return false;
+        }
+
+        const activityTime = getRecordActivityTime(record);
+        if (!activityTime) {
+            return false;
+        }
+
+        // 只自动恢复最近 30 分钟内仍在处理的任务，避免历史脏数据触发海量无效轮询
+        return Date.now() - activityTime.getTime() <= 30 * 60 * 1000;
+    };
+
+    const buildHistoryQueryParams = () => {
+        const params = { page: 1, page_size: 100 };
+
+        if (statusFilter !== 'all') {
+            params.status = statusFilter;
+        }
+
+        if (Array.isArray(dateRange) && dateRange.length === 2) {
+            const startDate = dateUtils.normalizeToDate(dateRange[0]);
+            const endDate = dateUtils.normalizeToDate(dateRange[1]);
+            if (startDate && endDate) {
+                params.start_time = dateUtils.formatDate(startDate, 'YYYY-MM-DD');
+                params.end_time = dateUtils.formatDate(endDate, 'YYYY-MM-DD');
+            }
+        }
+
+        return params;
+    };
 
     // 获取OCR服务状态
     const fetchOcrStatus = async (silent = false) => {
@@ -182,22 +309,75 @@ const MainPage = () => {
     };
 
     // 加载历史生成记录
-    const fetchGenerationHistory = async () => {
+    const fetchGenerationHistory = async (queryParams = { page: 1, page_size: 100 }) => {
         try {
             setHistoryLoading(true);
-            const response = await AiTestCaseGeneratorService.getGenerationHistory({ page: 1, page_size: 100 });
+            const response = await AiTestCaseGeneratorService.getGenerationHistory(queryParams);
             if (response && response.data && response.data.records) {
-                const historyData = response.data.records.map(record => ({
-                    key: record.test_case_id,
-                    TestCaseID: record.test_case_id,
-                    TestCaseGenStatus: record.status,
-                    Message: record.message,
-                    createTime: record.create_time,
-                    // 默认赋予一个空链接，真实的链接可能需要调用详情接口获取，不过对于展示来说可以兼容
-                    DownloadUrl: '',
-                    businessProcess: record.message?.includes('泛化') ? '测试集泛化' : '指令附件生成'
-                }));
-                setGeneratedResults(historyData);
+                const historyData = response.data.records.map(record => {
+                    let displayMessage = record.message || '';
+                    if (displayMessage.includes('Successfully generated')) {
+                        displayMessage = `成功生成 ${displayMessage.match(/\d+/)?.[0] || ''} 份文件`;
+                    } else if (displayMessage.includes('Successfully processed')) {
+                        displayMessage = `成功处理 ${displayMessage.match(/\d+/)?.[0] || ''} 条数据`;
+                    }
+                    return {
+                        key: record.test_case_id,
+                        TestCaseID: record.test_case_id,
+                        TestCaseGenStatus: record.status,
+                        Message: displayMessage,
+                        createTime: record.create_time,
+                        updateTime: record.update_time,
+                        isComparisonDone: Boolean(record.is_comparison_done),
+                        DownloadUrl: '',
+                        businessProcess: record.message?.includes('泛化') ? '测试集泛化' : '指令附件生成'
+                    };
+                });
+                const nextRecordIds = new Set(historyData.map(item => item.TestCaseID));
+                Object.keys(generationPollTimersRef.current).forEach((testCaseId) => {
+                    if (!nextRecordIds.has(testCaseId)) {
+                        clearGenerationPoll(testCaseId);
+                    }
+                });
+                Object.keys(comparisonPollTimersRef.current).forEach((testCaseId) => {
+                    if (!nextRecordIds.has(testCaseId)) {
+                        clearComparisonPoll(testCaseId);
+                    }
+                });
+                setGeneratedResults(historyData); // 直接覆盖当前结果
+
+                const resumablePendingRecords = historyData
+                    .filter(shouldAutoResumeGenerationPoll)
+                    .sort((a, b) => {
+                        const timeA = getRecordActivityTime(a);
+                        const timeB = getRecordActivityTime(b);
+                        if (!timeA && !timeB) return 0;
+                        if (!timeA) return 1;
+                        if (!timeB) return -1;
+                        return timeB - timeA;
+                    })
+                    .slice(0, 2);
+                const resumablePendingIds = new Set(resumablePendingRecords.map(item => item.TestCaseID));
+
+                historyData.forEach((record) => {
+                    if (resumablePendingIds.has(record.TestCaseID)) {
+                        pollGenerationResult(record.TestCaseID);
+                    } else {
+                        clearGenerationPoll(record.TestCaseID);
+                    }
+
+                    if (record.TestCaseGenStatus === 'N' || record.isComparisonDone) {
+                        clearComparisonPoll(record.TestCaseID);
+                    } else if (record.TestCaseGenStatus === 'Y' && !record.isComparisonDone) {
+                        // 避免在初始化时恢复所有的比对轮询，只恢复最近 30 分钟内活跃的记录的比对轮询
+                        const activityTime = getRecordActivityTime(record);
+                        if (activityTime && (Date.now() - activityTime.getTime() <= 30 * 60 * 1000)) {
+                            pollComparisonResult(record.TestCaseID, record.createTime);
+                        } else {
+                            clearComparisonPoll(record.TestCaseID);
+                        }
+                    }
+                });
             }
         } catch (error) {
             message.error(`加载历史记录失败: ${error.message}`);
@@ -210,6 +390,11 @@ const MainPage = () => {
     useEffect(() => {
         fetchGenerationHistory();
         fetchOcrStatus(true); // 静默获取OCR状态
+
+        return () => {
+            Object.keys(generationPollTimersRef.current).forEach(clearGenerationPoll);
+            Object.keys(comparisonPollTimersRef.current).forEach(clearComparisonPoll);
+        };
     }, []);
 
     // 计算按钮是否应该被禁用
@@ -234,7 +419,7 @@ const MainPage = () => {
     // 搜索和筛选状态
     const [searchText, setSearchText] = useState('');
     const [statusFilter, setStatusFilter] = useState('all');
-    const [dateRange, setDateRange] = useState([]);
+    const [dateRange, setDateRange] = useState(null);
 
     // 生成泛化数据
     const handleGenerate = async () => {
@@ -296,8 +481,14 @@ const MainPage = () => {
                 TestCaseGenStatus: result.TestCaseGenStatus || 'N',
                 Message: result.Message || '操作完成',
                 DownloadUrl: result.DownloadUrl || '',
-                createTime: dateUtils.formatDate(new Date())
+                createTime: dateUtils.formatDate(new Date()),
+                isComparisonDone: functionType === '测试集泛化' ? true : !comparisonEnabled
             };
+            if (newResult.Message.includes('Successfully generated')) {
+                newResult.Message = `成功生成 ${newResult.Message.match(/\d+/)?.[0] || ''} 份文件`;
+            } else if (newResult.Message.includes('Successfully processed')) {
+                newResult.Message = `成功处理 ${newResult.Message.match(/\d+/)?.[0] || ''} 条数据`;
+            }
 
             // 提取 Attachments 并展示（如果有）
             if (result.Attachments && Array.isArray(result.Attachments) && result.Attachments.length > 0) {
@@ -308,8 +499,15 @@ const MainPage = () => {
                 }
             }
 
-            // 保存历史记录，将新结果添加到已有结果的前面
-            setGeneratedResults(prevResults => [newResult, ...prevResults]);
+            // 【关键修改】只将新结果追加到顶部，使用纯函数式避免闭包陷阱
+            setGeneratedResults(prevResults => {
+                const isExist = prevResults.some(r => r.TestCaseID === newResult.TestCaseID);
+                if (isExist) {
+                    return prevResults.map(r => r.TestCaseID === newResult.TestCaseID ? newResult : r);
+                }
+                return [newResult, ...prevResults];
+            });
+
             message.success('生成任务已提交，后台处理中！');
 
             // 如果是处理中状态，开始轮询生成结果
@@ -317,10 +515,6 @@ const MainPage = () => {
                 pollGenerationResult(newResult.TestCaseID);
             }
 
-            // 如果开启了比对评测，自动轮询获取比对结果
-            if (comparisonEnabled && result.TestCaseID) {
-                pollComparisonResult(result.TestCaseID, newResult.createTime);
-            }
         } catch (error) {
             message.error(error.message || '生成失败，请检查网络或后端服务');
         } finally {
@@ -330,87 +524,198 @@ const MainPage = () => {
 
     // 轮询获取生成结果
     const pollGenerationResult = async (testCaseId, retryCount = 0) => {
-        const MAX_RETRIES = 120; // 最大重试次数
-        const RETRY_INTERVAL = 5000; // 重试间隔(ms)
+        if (retryCount === 0) {
+            if (generationPollingActiveRef.current[testCaseId]) {
+                return;
+            }
+            generationPollingActiveRef.current[testCaseId] = true;
+        }
+
+        if (generationPollingInFlightRef.current[testCaseId]) {
+            return;
+        }
+
+        const MAX_RETRIES = 180; // 最大重试次数
+        // 前期高频轮询以提升“生成完成”后的刷新实时性，后期逐步降频以控制请求量
+        const getRetryInterval = (count) => {
+            if (count < 10) return 1000;
+            if (count < 30) return 2000;
+            if (count < 60) return 3000;
+            return 5000;
+        };
 
         try {
+            generationPollingInFlightRef.current[testCaseId] = true;
             const response = await AiTestCaseGeneratorService.getGenerationResult(testCaseId);
             if (response && response.code === 200 && response.data) {
                 const record = response.data;
                 const status = record.status;
                 
                 if (status === 'Y' || status === 'N') {
-                    // 更新列表中的状态
-                    setGeneratedResults(prev => prev.map(item => {
-                        if (item.TestCaseID === testCaseId) {
-                            let downloadUrl = item.DownloadUrl;
-                            if (record.attachments && record.attachments.length > 0) {
-                                downloadUrl = record.attachments.map(att => att.download_url).filter(Boolean).join(';');
+                    clearGenerationPoll(testCaseId);
+                    // 将消息提示转换为中文
+                    let displayMessage = record.message || '操作完成';
+                    if (displayMessage.includes('Successfully generated')) {
+                        displayMessage = `成功生成 ${displayMessage.match(/\d+/)?.[0] || ''} 份文件`;
+                    } else if (displayMessage.includes('Successfully processed')) {
+                        displayMessage = `成功处理 ${displayMessage.match(/\d+/)?.[0] || ''} 条数据`;
+                    }
+
+                    setGeneratedResults(prev => {
+                        const newArray = prev.map(item => {
+                            if (item.TestCaseID === testCaseId) {
+                                let downloadUrl = item.DownloadUrl;
+                                if (record.attachments && record.attachments.length > 0) {
+                                    downloadUrl = record.attachments.map(att => att.download_url).filter(Boolean).join(';');
+                                }
+                                return {
+                                    ...item,
+                                    TestCaseGenStatus: status,
+                                    Message: displayMessage,
+                                    DownloadUrl: downloadUrl,
+                                    isComparisonDone: Boolean(record.is_comparison_done)
+                                };
                             }
-                            return {
-                                ...item,
-                                TestCaseGenStatus: status,
-                                Message: record.message,
-                                DownloadUrl: downloadUrl
-                            };
-                        }
-                        return item;
-                    }));
+                            return item;
+                        });
+                        return newArray;
+                    });
                     
                     if (status === 'Y') {
                         message.success(`案例集 ${testCaseId} 生成成功！`);
+                        if (!record.is_comparison_done) {
+                            pollComparisonResult(testCaseId, record.create_time);
+                        }
                     } else {
-                        message.error(`案例集 ${testCaseId} 生成失败：${record.message}`);
+                        message.error(`案例集 ${testCaseId} 生成失败：${displayMessage}`);
                     }
-                } else if (retryCount < MAX_RETRIES) {
-                    setTimeout(() => {
-                        pollGenerationResult(testCaseId, retryCount + 1);
-                    }, RETRY_INTERVAL);
+                    return; // 重要：成功或失败后直接返回，不要再进入重试逻辑
                 }
+
+                if (retryCount < MAX_RETRIES) {
+                    const retryInterval = getRetryInterval(retryCount);
+                    const existingTimer = generationPollTimersRef.current[testCaseId];
+                    if (existingTimer) {
+                        clearTimeout(existingTimer);
+                    }
+                    generationPollTimersRef.current[testCaseId] = setTimeout(() => {
+                        pollGenerationResult(testCaseId, retryCount + 1);
+                    }, retryInterval);
+                }
+            } else if (retryCount < MAX_RETRIES) {
+                const retryInterval = getRetryInterval(retryCount);
+                const existingTimer = generationPollTimersRef.current[testCaseId];
+                if (existingTimer) {
+                    clearTimeout(existingTimer);
+                }
+                generationPollTimersRef.current[testCaseId] = setTimeout(() => {
+                    pollGenerationResult(testCaseId, retryCount + 1);
+                }, retryInterval);
             }
         } catch (error) {
             if (retryCount < MAX_RETRIES) {
-                setTimeout(() => {
+                const retryInterval = getRetryInterval(retryCount);
+                const existingTimer = generationPollTimersRef.current[testCaseId];
+                if (existingTimer) {
+                    clearTimeout(existingTimer);
+                }
+                generationPollTimersRef.current[testCaseId] = setTimeout(() => {
                     pollGenerationResult(testCaseId, retryCount + 1);
-                }, RETRY_INTERVAL);
+                }, retryInterval);
             }
+        } finally {
+            delete generationPollingInFlightRef.current[testCaseId];
         }
     };
 
     // 轮询获取比对结果
     const pollComparisonResult = async (testCaseId, createTime, retryCount = 0) => {
+        if (retryCount === 0) {
+            if (comparisonPollingActiveRef.current[testCaseId]) {
+                return;
+            }
+            comparisonPollingActiveRef.current[testCaseId] = true;
+        }
+
+        if (comparisonPollingInFlightRef.current[testCaseId]) {
+            return;
+        }
+
         const MAX_RETRIES = 100; // 最大重试次数
         const RETRY_INTERVAL = 5000; // 重试间隔(ms)
 
         try {
-            const response = await AiTestCaseGeneratorService.getComparisonResult(testCaseId);
+            comparisonPollingInFlightRef.current[testCaseId] = true;
+            const generationResponse = await AiTestCaseGeneratorService.getGenerationResult(testCaseId);
+            if (generationResponse && generationResponse.code === 200 && generationResponse.data) {
+                const generationRecord = generationResponse.data;
+                
+                let displayMessage = generationRecord.message || '';
+                if (displayMessage.includes('Successfully generated')) {
+                    displayMessage = `成功生成 ${displayMessage.match(/\d+/)?.[0] || ''} 份文件`;
+                } else if (displayMessage.includes('Successfully processed')) {
+                    displayMessage = `成功处理 ${displayMessage.match(/\d+/)?.[0] || ''} 条数据`;
+                }
 
-            if (response && response.data && response.data.length > 0) {
-                // 将获取到的比对明细组装并存入列表
-                const newComparisonResults = response.data.map((item, index) => ({
-                    key: `${testCaseId}_${index}`,
-                    TestCaseID: testCaseId,
-                    createTime: createTime,
-                    ...item
-                }));
+                setGeneratedResults(prev => {
+                    const newArray = prev.map(item => item.TestCaseID === testCaseId ? {
+                        ...item,
+                        TestCaseGenStatus: generationRecord.status || item.TestCaseGenStatus,
+                        Message: displayMessage || item.Message,
+                        isComparisonDone: Boolean(generationRecord.is_comparison_done)
+                    } : item);
+                    return newArray;
+                });
 
-                setComparisonResults(prev => [...newComparisonResults, ...prev]);
-                message.success(`案例集 ${testCaseId} 的比对结果已返回`);
-            } else if (retryCount < MAX_RETRIES) {
-                // 如果没有数据说明还在比对中，继续轮询
-                setTimeout(() => {
+                if (generationRecord.status === 'N') {
+                    clearComparisonPoll(testCaseId);
+                    return;
+                }
+
+                if (generationRecord.is_comparison_done) {
+                    clearComparisonPoll(testCaseId);
+                    const response = await AiTestCaseGeneratorService.getComparisonResult(testCaseId);
+                    if (response && response.code === 200 && Array.isArray(response.data) && response.data.length > 0) {
+                        const effectiveCreateTime = createTime || generationRecord.create_time;
+                        const newComparisonResults = response.data.map((item, index) => ({
+                            key: `${testCaseId}_${index}`,
+                            TestCaseID: testCaseId,
+                            createTime: effectiveCreateTime,
+                            ...item
+                        }));
+
+                        setComparisonResults(prev => mergeComparisonResults(prev, newComparisonResults));
+                        message.success(`案例集 ${testCaseId} 的比对结果已返回`);
+                    }
+                    return; // 重要：比对完成后直接返回，不要再进入重试逻辑
+                }
+            }
+
+            if (retryCount < MAX_RETRIES) {
+                const existingTimer = comparisonPollTimersRef.current[testCaseId];
+                if (existingTimer) {
+                    clearTimeout(existingTimer);
+                }
+                comparisonPollTimersRef.current[testCaseId] = setTimeout(() => {
                     pollComparisonResult(testCaseId, createTime, retryCount + 1);
                 }, RETRY_INTERVAL);
             } else {
                 message.warning(`案例集 ${testCaseId} 比对超时`);
+                clearComparisonPoll(testCaseId);
             }
         } catch (error) {
             console.error('获取比对结果失败:', error);
             if (retryCount < MAX_RETRIES) {
-                setTimeout(() => {
+                const existingTimer = comparisonPollTimersRef.current[testCaseId];
+                if (existingTimer) {
+                    clearTimeout(existingTimer);
+                }
+                comparisonPollTimersRef.current[testCaseId] = setTimeout(() => {
                     pollComparisonResult(testCaseId, createTime, retryCount + 1);
                 }, RETRY_INTERVAL);
             }
+        } finally {
+            delete comparisonPollingInFlightRef.current[testCaseId];
         }
     };
     // 下载文件函数 - 调用DOWNLOAD_ATTACHMENTS接口直接下载
@@ -467,18 +772,18 @@ const MainPage = () => {
                 const response = await AiTestCaseGeneratorService.getComparisonResult(comparisonSearchText.trim());
                 
                 if (response && response.code === 200 && response.data && response.data.length > 0) {
+                    const matchedGenerationRecord = generatedResults.find(item => item.TestCaseID === comparisonSearchText.trim());
                     const newComparisonResults = response.data.map((item, index) => ({
                         key: `${comparisonSearchText.trim()}_${index}_${Date.now()}`,
                         TestCaseID: comparisonSearchText.trim(),
-                        createTime: dateUtils.formatDate(new Date()), // 历史查询暂用当前时间占位，或从生成结果中匹配
+                        createTime: matchedGenerationRecord?.createTime || '',
                         ...item
                     }));
                     
-                    // 将查询到的结果合并到列表中（去重）
-                    setComparisonResults(prev => {
-                        const filtered = prev.filter(p => p.TestCaseID !== comparisonSearchText.trim());
-                        return [...newComparisonResults, ...filtered];
-                    });
+                    setComparisonResults(prev => mergeComparisonResults(
+                        prev.filter(item => item.TestCaseID !== comparisonSearchText.trim()),
+                        newComparisonResults
+                    ));
                     message.success({ content: '比对结果查询完成', key: 'query_comp' });
                 } else {
                     message.warning({ content: '暂无该案例集的比对结果', key: 'query_comp' });
@@ -518,7 +823,7 @@ const MainPage = () => {
                         }));
 
                         console.log(`案例集 ${result.TestCaseID} 找到 ${newComparisonResults.length} 条比对结果`);
-                        setComparisonResults(prev => [...newComparisonResults, ...prev]);
+                        setComparisonResults(prev => mergeComparisonResults(prev, newComparisonResults));
                         hasResults = true;
                     } else {
                         console.log(`案例集 ${result.TestCaseID} 暂无比对结果或响应格式不正确`);
@@ -567,7 +872,7 @@ const MainPage = () => {
 
             // 判断比对状态：如果所有项都通过则为"比对完成"，否则为"比对失败"
             const allPassed = items.every(item => item.pass_or_not === 'Y');
-            const status = allPassed ? '比对完成' : '比对失败';
+            const status = allPassed ? 'Y' : 'N';
 
             return {
                 key: testCaseId,
@@ -579,6 +884,13 @@ const MainPage = () => {
                 detailCount: items.length,
                 details: items // 保存详细数据
             };
+        }).sort((a, b) => {
+            const dateA = a.createTime ? dateUtils.parseDate(a.createTime) : null;
+            const dateB = b.createTime ? dateUtils.parseDate(b.createTime) : null;
+            if (!dateA && !dateB) return 0;
+            if (!dateA) return 1;
+            if (!dateB) return -1;
+            return dateB - dateA;
         });
     }, [comparisonResults]);
 
@@ -749,7 +1061,7 @@ const MainPage = () => {
 
             return matchesSearch && matchesStatus && matchesDate;
         }).sort((a, b) => {
-            // 按创建时间升序排序
+            // 按创建时间倒序排序
             const dateA = a.createTime ? dateUtils.parseDate(a.createTime) : null;
             const dateB = b.createTime ? dateUtils.parseDate(b.createTime) : null;
 
@@ -757,7 +1069,7 @@ const MainPage = () => {
             if (!dateA) return 1; // 没有时间的排后面
             if (!dateB) return -1;
 
-            return dateA - dateB; // 升序排序
+            return dateB - dateA;
         });
     }, [generatedResults, searchText, statusFilter, dateRange]);
 
@@ -766,18 +1078,19 @@ const MainPage = () => {
         setSearchText('');
         setStatusFilter('all');
         setDateRange(null); // 设置为 null，清空日期范围
+        fetchGenerationHistory({ page: 1, page_size: 100 }); // 重置后重新拉取全部数据
     };
 
     // 比对结果搜索和筛选逻辑
     const filteredComparisonResults = useMemo(() => {
-        return comparisonResults.filter(result => {
+        return groupedComparisonResults.filter(result => {
             // 案例集ID搜索
             const matchesSearch = comparisonSearchText === '' ||
                 (result.TestCaseID && result.TestCaseID.toLowerCase().includes(comparisonSearchText.toLowerCase()));
 
             // 状态筛选
             const matchesStatus = comparisonStatusFilter === 'all' ||
-                result.pass_or_not === comparisonStatusFilter;
+                result.status === comparisonStatusFilter;
 
             // 创建时间筛选
             let matchesDate = true;
@@ -808,7 +1121,7 @@ const MainPage = () => {
 
             return matchesSearch && matchesStatus && matchesDate;
         }).sort((a, b) => {
-            // 按创建时间升序排序
+            // 按创建时间倒序排序
             const dateA = a.createTime ? dateUtils.parseDate(a.createTime) : null;
             const dateB = b.createTime ? dateUtils.parseDate(b.createTime) : null;
 
@@ -816,9 +1129,9 @@ const MainPage = () => {
             if (!dateA) return 1; // 没有时间的排后面
             if (!dateB) return -1;
 
-            return dateA - dateB; // 升序排序
+            return dateB - dateA;
         });
-    }, [comparisonResults, comparisonSearchText, comparisonStatusFilter, comparisonDateRange]);
+    }, [groupedComparisonResults, comparisonSearchText, comparisonStatusFilter, comparisonDateRange]);
 
     const handleClearComparisonFilters = () => {
         setComparisonSearchText('');
@@ -835,7 +1148,7 @@ const MainPage = () => {
 
         const exportData = filteredResults.map(item => ({
             '案例集 ID': item.TestCaseID,
-            '生成状态': item.TestCaseGenStatus === 'Y' ? '生成成功' : '生成失败',
+            '生成状态': item.TestCaseGenStatus === 'Y' ? '生成成功' : (item.TestCaseGenStatus === 'P' ? '处理中' : '生成失败'),
             '消息提示': item.Message,
             '创建时间': item.createTime,
             '案例下载链接': item.DownloadUrl
@@ -857,15 +1170,9 @@ const MainPage = () => {
 
         const exportData = filteredComparisonResults.map(item => ({
             '案例集 ID': item.TestCaseID,
-            '比对状态': item.pass_or_not === 'Y' ? '通过' : '失败',
-            '文件类型': item.file_type,
-            '子类型': item.file_sub_type,
-            '要素名称': item.element_name,
-            '比对总数': item.comparison_count,
-            '正确数': item.correct_count,
-            '错误数': item.mistake_count,
-            '不清晰数': item.unclear_count,
-            '正确率': `${(item.correct_percentage * 100).toFixed(2)}%`,
+            '比对状态': item.status === 'Y' ? '比对通过' : '比对失败',
+            '明细条数': item.detailCount,
+            '平均正确率': `${Number(item.avgPercentage || 0).toFixed(2)}%`,
             '创建时间': item.createTime
         }));
 
@@ -963,10 +1270,10 @@ const MainPage = () => {
             width: 120,
             render: (status) => (
                 <span style={{
-                    color: status === '比对完成' ? '#52c41a' : '#ff4d4f',
+                    color: status === 'Y' ? '#52c41a' : '#ff4d4f',
                     fontWeight: 'bold'
                 }}>
-                    {status}
+                    {status === 'Y' ? '比对通过' : '比对失败'}
                 </span>
             ),
         },
@@ -1212,6 +1519,7 @@ const MainPage = () => {
                             placeholder="生成状态"
                         >
                             <Select.Option value="all">全部状态</Select.Option>
+                            <Select.Option value="P">处理中</Select.Option>
                             <Select.Option value="Y">生成成功</Select.Option>
                             <Select.Option value="N">生成失败</Select.Option>
                         </Select>
@@ -1263,9 +1571,25 @@ const MainPage = () => {
                                             Message: record.message,
                                             createTime: record.create_time,
                                             DownloadUrl: downloadUrl,
+                                            isComparisonDone: Boolean(record.is_comparison_done),
                                             businessProcess: record.message?.includes('泛化') ? '测试集泛化' : '指令附件生成'
                                         }];
+                                        Object.keys(generationPollTimersRef.current).forEach((testCaseId) => {
+                                            if (testCaseId !== record.test_case_id) {
+                                                clearGenerationPoll(testCaseId);
+                                            }
+                                        });
+                                        Object.keys(comparisonPollTimersRef.current).forEach((testCaseId) => {
+                                            if (testCaseId !== record.test_case_id) {
+                                                clearComparisonPoll(testCaseId);
+                                            }
+                                        });
                                         setGeneratedResults(historyData);
+                                        if (record.status === 'P' || record.status === 'Processing') {
+                                            pollGenerationResult(record.test_case_id);
+                                        } else if (record.status === 'Y' && !record.is_comparison_done) {
+                                            pollComparisonResult(record.test_case_id, record.create_time);
+                                        }
                                         message.success('查询完成');
                                     } else {
                                         setGeneratedResults([]);
@@ -1278,7 +1602,7 @@ const MainPage = () => {
                                 }
                             } else {
                                 // 没有搜索词时重新拉取分页列表
-                                await fetchGenerationHistory();
+                                await fetchGenerationHistory(buildHistoryQueryParams());
                                 message.success('查询完成');
                             }
                         }}
@@ -1309,9 +1633,9 @@ const MainPage = () => {
                 <div className="ai-tcg-result-header" style={{ paddingRight: '16px' }}>
                     <h3 className="ai-tcg-result-title">比对结果</h3>
                     <div className="ai-tcg-filter-info" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                        {filteredComparisonResults.length !== comparisonResults.length && (
+                        {filteredComparisonResults.length !== groupedComparisonResults.length && (
                             <span className="ai-tcg-filter-count">
-                                已筛选 {filteredComparisonResults.length} / {comparisonResults.length} 条记录
+                                已筛选 {filteredComparisonResults.length} / {groupedComparisonResults.length} 条记录
                             </span>
                         )}
                         <Button
@@ -1383,7 +1707,7 @@ const MainPage = () => {
 
                 <Table
                     columns={comparisonColumns}
-                    dataSource={groupedComparisonResults}
+                    dataSource={filteredComparisonResults}
                     scroll={{ x: 'max-content' }} // 添加水平滚动，防止列多时挤压
                     pagination={{
                         pageSize: 5,
@@ -1393,7 +1717,7 @@ const MainPage = () => {
                     }}
                     size="middle"
                     locale={{
-                        emptyText: groupedComparisonResults.length === 0 ? '暂无符合条件的结果' : '加载中...'
+                        emptyText: filteredComparisonResults.length === 0 ? '暂无符合条件的结果' : '加载中...'
                     }}
                 />
             </div >

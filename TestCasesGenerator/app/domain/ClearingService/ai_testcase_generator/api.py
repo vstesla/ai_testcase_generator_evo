@@ -11,7 +11,7 @@ import asyncio
 import os
 import shutil
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi.responses import StreamingResponse
 from urllib.parse import quote
 
@@ -253,7 +253,8 @@ async def generate_attachments(
             TestCaseGenStatus="P",
             Message="任务已提交后台队列，正在处理中...",
             DownloadUrl="",
-            Attachments=[]
+            Attachments=[],
+            is_comparison_done=False
         )
 
     except Exception as e:
@@ -359,9 +360,12 @@ async def check_ocr_status():
         raise HTTPException(status_code=500, detail=f"查询OCR状态失败: {str(e)}")
 
 @router.get("/generation_history")
-async def get_generation_history(
+def get_generation_history(
     page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(20, ge=1, le=100, description="每页数量")
+    page_size: int = Query(20, ge=1, le=100, description="每页数量"),
+    status: Optional[str] = Query(None, description="生成状态筛选（P/Y/N）"),
+    start_time: Optional[str] = Query(None, description="开始日期，格式 YYYY-MM-DD"),
+    end_time: Optional[str] = Query(None, description="结束日期，格式 YYYY-MM-DD")
 ):
     """
     前端查询接口：获取历史生成批次列表（支持分页）。
@@ -373,20 +377,40 @@ async def get_generation_history(
         # 计算分页偏移量
         offset = (page - 1) * page_size
 
+        filters = []
+        params = []
+
+        if status:
+            filters.append("status = %s")
+            params.append(status)
+
+        if start_time:
+            start_dt = datetime.strptime(start_time, "%Y-%m-%d")
+            filters.append("create_time >= %s")
+            params.append(start_dt)
+
+        if end_time:
+            end_dt = datetime.strptime(end_time, "%Y-%m-%d") + timedelta(days=1)
+            filters.append("create_time < %s")
+            params.append(end_dt)
+
+        where_clause = f" WHERE {' AND '.join(filters)}" if filters else ""
+
         # 查询总数
-        count_sql = "SELECT COUNT(*) as total FROM ai_testcase_generate_record"
-        total_rows = db.execute_query(count_sql)
+        count_sql = f"SELECT COUNT(*) as total FROM ai_testcase_generate_record{where_clause}"
+        total_rows = db.execute_query(count_sql, tuple(params))
         total = total_rows[0]['total'] if total_rows else 0
 
         # 查询数据
-        query_sql = """
+        query_sql = f"""
             SELECT
                 test_case_id, status, message, create_time, update_time, is_comparison_done
             FROM ai_testcase_generate_record
+            {where_clause}
             ORDER BY create_time DESC
             LIMIT %s OFFSET %s
         """
-        rows = db.execute_query(query_sql, (page_size, offset))
+        rows = db.execute_query(query_sql, tuple(params + [page_size, offset]))
 
         result_data = []
         for row in rows:
@@ -416,7 +440,7 @@ async def get_generation_history(
 
 
 @router.get("/generation_result")
-async def get_generation_result(test_case_id: str = Query(..., description="测试集生成的批次ID")):
+def get_generation_result(test_case_id: str = Query(..., description="测试集生成的批次ID")):
     """
     前端查询接口：根据 test_case_id 查询单次生成的详情，包含生成的附件列表。
     """
@@ -466,7 +490,7 @@ async def get_generation_result(test_case_id: str = Query(..., description="测�
 
 
 @router.get("/comparison_result")
-async def get_comparison_result(test_case_id: str = Query(..., description="测试集生成的批次ID")):
+def get_comparison_result(test_case_id: str = Query(..., description="测试集生成的批次ID")):
     """
     前端查询接口：根据 test_case_id 查询 comparison_info 表里的比对结果详情。
     返回标准的 JSON 格式数据供前端渲染。

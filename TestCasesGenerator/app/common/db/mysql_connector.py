@@ -102,7 +102,7 @@ class ConnectionPool:
                 database=self.database,
                 charset=self.charset,
                 cursorclass=pymysql.cursors.DictCursor,
-                autocommit=False
+                autocommit=True
             )
         except Exception as e:
             print(f"创建数据库连接失败: {e}")
@@ -300,33 +300,35 @@ class MySQLConnector:
     
     def execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """执行查询语句"""
-        if not self._check_connection():
+        conn = self.pool.get_connection()
+        if not conn:
             raise Exception("数据库连接失败")
         try:
-            self.cursor.execute(query, params)
-            return self.cursor.fetchall()
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                return cursor.fetchall()
         except Exception as e:
             print(f"查询执行失败: {e}")
-            if self.connection:
-                self.pool.release_connection(self.connection)
-                self.connection = None
             raise
+        finally:
+            self.pool.release_connection(conn)
 
     def execute_update(self, query: str, params: tuple = None) -> int:
         """执行更新语句"""
-        if not self._check_connection():
+        conn = self.pool.get_connection()
+        if not conn:
             raise Exception("数据库连接失败")
         try:
-            self.cursor.execute(query, params)
-            self.connection.commit()
-            return self.cursor.lastrowid
+            with conn.cursor() as cursor:
+                cursor.execute(query, params)
+                conn.commit()
+                return cursor.lastrowid
         except Exception as e:
             print(f"更新执行失败: {e}")
-            if self.connection:
-                self.connection.rollback()
-                self.pool.release_connection(self.connection)
-                self.connection = None
+            conn.rollback()
             raise
+        finally:
+            self.pool.release_connection(conn)
 
     def get_table_data(self, table_name: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
