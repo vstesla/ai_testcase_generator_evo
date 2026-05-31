@@ -315,6 +315,8 @@ async def download_files(
             media_type = "application/octet-stream"
 
         # 返回流式响应
+        from fastapi import BackgroundTasks
+        
         def iterfile():
             file_stream.seek(0)
             while True:
@@ -322,6 +324,22 @@ async def download_files(
                 if not chunk:
                     break
                 yield chunk
+
+        def cleanup_temp_files():
+            try:
+                # 关闭流
+                file_stream.close()
+                # 获取 process_service 的 Temp 目录并清理这个 zip/pdf 文件
+                import os
+                temp_dir = process_service.TEMP_DIR
+                if os.path.exists(temp_dir):
+                    # 安全起见，只删除该 test_case_id 相关的临时文件
+                    for f in os.listdir(temp_dir):
+                        if test_case_id in f or filename in f:
+                            os.remove(os.path.join(temp_dir, f))
+                            logger.info(f"Cleaned up streamed file: {f}")
+            except Exception as e:
+                logger.error(f"Error cleaning up streamed file for {test_case_id}: {e}")
 
         # 对文件名进行URL编码，支持中文文件名
         encoded_filename = quote(filename, safe='')
@@ -332,11 +350,15 @@ async def download_files(
         }
 
         logger.info(f"Returning file: {filename}, type: {'ZIP' if is_zip else 'FILE'}")
+        
+        background_tasks = BackgroundTasks()
+        background_tasks.add_task(cleanup_temp_files)
 
         return StreamingResponse(
             iterfile(),
             media_type=media_type,
-            headers=headers
+            headers=headers,
+            background=background_tasks
         )
 
     except ValueError as ve:

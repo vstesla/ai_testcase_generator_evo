@@ -43,6 +43,25 @@ class DBUtilsClass:
         sql = f"INSERT INTO {table} ({keys}) VALUES ({placeholders})"
         return self.execute_update(sql, values)
 
+    def update(self, table, data, where=None):
+        """更新数据"""
+        if not data:
+            return False
+
+        set_clause = ", ".join([f"{key} = %s" for key in data.keys()])
+        params = list(data.values())
+        sql = f"UPDATE {table} SET {set_clause}"
+
+        if where:
+            conditions = []
+            for key, value in where.items():
+                conditions.append(f"{key} = %s")
+                params.append(value)
+            if conditions:
+                sql += " WHERE " + " AND ".join(conditions)
+
+        return self.execute_update(sql, tuple(params))
+
     def select(self, table, columns=None, where=None):
         """查询数据"""
         cols = "*" if not columns else ", ".join(columns)
@@ -63,4 +82,3 @@ class DBUtilsClass:
 DBUtils = DBUtilsClass()
 # 为了兼容 process_service.py 等地方的旧有导入 (from app.common.db.db_utils import db_utils)
 db_utils = DBUtils
-

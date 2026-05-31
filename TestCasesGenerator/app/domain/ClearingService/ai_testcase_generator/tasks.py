@@ -40,11 +40,19 @@ def generate_attachments_task(
                 file_path_identifier=file_path_identifier,
                 timestamp=timestamp,
                 enable_comparison=enable_comparison,
-                test_case_id_batch=test_case_id_batch
+                test_case_id_batch=test_case_id_batch,
+                defer_comparison_task=True
             )
             
             # 2. 结果落库
             _record_generation_result(result)
+
+            # 3. 生成完成后，单独分发比对任务，避免 Celery 当前事件循环关闭导致 create_task 丢失
+            if enable_comparison and result.get("TestCaseGenStatus") == "Y" and result.get("generated_file_info"):
+                compare_attachments_task.delay(
+                    test_case_id=result["TestCaseID"],
+                    generated_file_info=result["generated_file_info"]
+                )
             return result
             
         except Exception as e:
@@ -65,5 +73,35 @@ def generate_attachments_task(
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         return loop.run_until_complete(_run_process())
+    finally:
+        loop.close()
+        # 清理在 API 接口中接收并保存的临时上传文件
+        import os
+        for path in [jktzs_file_path, jktzs_template_path]:
+            if path and os.path.exists(path):
+                try:
+                    os.remove(path)
+                    logger.info(f"Cleaned up temp file in Celery Task: {path}")
+                except OSError as e:
+                    logger.warning(f"Failed to clean up temp file {path}: {e}")
+
+
+@celery_app.task(bind=True)
+def compare_attachments_task(self, test_case_id: str, generated_file_info):
+    """异步任务：处理解析与比对，完成后更新 comparison_info 与 is_comparison_done。"""
+
+    async def _run_compare():
+        process_service = ProcessService()
+        await process_service._parse_and_evaluate(test_case_id, generated_file_info)
+        return {"test_case_id": test_case_id, "is_comparison_done": True}
+
+    try:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(_run_compare())
+    except Exception as e:
+        logger.error(f"Error in compare Celery Task: {e}")
+        logger.error(traceback.format_exc())
+        return {"test_case_id": test_case_id, "is_comparison_done": False, "message": str(e)}
     finally:
         loop.close()

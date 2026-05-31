@@ -183,7 +183,7 @@ class ProcessService:
             return {
                 "TestCaseID": test_case_id,
                 "TestCaseGenStatus": "Y",
-                "Message": f"Successfully processed {len(all_results)} items.",
+                "Message": f"成功处理 {len(all_results)} 条数据",
                 "DownloadUrl": download_url,
                 "Attachments": [{"attachment_id": file_id, "download_url": download_url}]
             }
@@ -489,8 +489,9 @@ class ProcessService:
                 if os.path.exists(local_pdf_path):
                     try:
                         os.remove(local_pdf_path)
-                    except OSError:
-                        pass
+                        logger.info(f"Cleaned up CKXY PDF file: {local_pdf_path}")
+                    except OSError as e:
+                        logger.warning(f"Failed to clean up CKXY PDF file {local_pdf_path}: {e}")
         
         if enable_comparison:
             asyncio.create_task(self._parse_and_evaluate(test_case_id_batch, generated_file_info))
@@ -510,7 +511,7 @@ class ProcessService:
             "is_comparison_done": is_comparison_done
         }
 
-    def _save_jktzs_intermediate(self, df_list, prefix, timestamp, file_path_identifier):
+    async def _save_jktzs_intermediate(self, df_list, prefix, timestamp, file_path_identifier):
         """
         保存缴款通知书的中间过程数据（如泛化、对抗后的结果）为 Excel，并上传 COS。
         """
@@ -542,9 +543,15 @@ class ProcessService:
                 logger.error(f"Intermediate upload failed: {e}")
             finally:
                 if os.path.exists(local_path):
-                    try: os.remove(local_path)
-                    except OSError: pass
-        asyncio.create_task(_upload_task())
+                    try: 
+                        os.remove(local_path)
+                        logger.info(f"Cleaned up intermediate temp file: {local_path}")
+                    except OSError as e: 
+                        logger.warning(f"Failed to clean up intermediate temp file {local_path}: {e}")
+        
+        # 将其作为后台任务，并在退出前等待，或者直接在此 await
+        # 考虑到是在 Celery 任务内部运行，直接 await 更加安全，能确保文件上传完成且进程不会提前结束
+        await _upload_task()
 
     async def _do_jktzs_generalization(self, test_audit_id, raw_data, current_data):
         """
@@ -662,11 +669,11 @@ class ProcessService:
                 
             processed_data_map[test_audit_id] = current_data
             
-        if enable_generalization and not enable_adversarial: self._save_jktzs_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
-        elif not enable_generalization and enable_adversarial: self._save_jktzs_intermediate(dk_df_list, "DK", timestamp, file_path_identifier)
+        if enable_generalization and not enable_adversarial: await self._save_jktzs_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
+        elif not enable_generalization and enable_adversarial: await self._save_jktzs_intermediate(dk_df_list, "DK", timestamp, file_path_identifier)
         elif enable_generalization and enable_adversarial:
-            self._save_jktzs_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
-            self._save_jktzs_intermediate(final_df_list, "", timestamp, file_path_identifier)
+            await self._save_jktzs_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
+            await self._save_jktzs_intermediate(final_df_list, "", timestamp, file_path_identifier)
             
         return processed_data_map
 
@@ -928,8 +935,11 @@ class ProcessService:
             }
         finally:
             if os.path.exists(local_pdf_path):
-                try: os.remove(local_pdf_path)
-                except OSError: pass
+                try: 
+                    os.remove(local_pdf_path)
+                    logger.info(f"Cleaned up generated PDF file: {local_pdf_path}")
+                except OSError as e: 
+                    logger.warning(f"Failed to clean up generated PDF file {local_pdf_path}: {e}")
 
     async def _render_jktzs_pdfs(self, processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path, test_case_id_batch=None):
         """
@@ -982,7 +992,7 @@ class ProcessService:
         self, business_process: str, jktzs_file_path: str, jktzs_template_path: str,
         file_count: int, enable_generalization: bool, enable_adversarial: bool,
         file_path_identifier: str, timestamp: int, enable_comparison: bool = True,
-        test_case_id_batch: str = None
+        test_case_id_batch: str = None, defer_comparison_task: bool = False
     ) -> Dict[str, Any]:
         """
         处理缴款通知书附件生成的总入口函数：
@@ -1006,8 +1016,9 @@ class ProcessService:
         
         # 4. 若开启对比开关，则触发后台异步轮询评测任务
         if enable_comparison:
-            import asyncio
-            asyncio.create_task(self._parse_and_evaluate(final_test_case_id, generated_file_info))
+            if not defer_comparison_task:
+                import asyncio
+                asyncio.create_task(self._parse_and_evaluate(final_test_case_id, generated_file_info))
             is_comparison_done = False
         else:
             is_comparison_done = True
@@ -1015,7 +1026,7 @@ class ProcessService:
         return {
             "TestCaseID": final_test_case_id,
             "TestCaseGenStatus": "Y" if download_urls else "N",
-            "Message": f"Successfully generated {len(download_urls)} JKTZS PDFs.",
+            "Message": f"成功生成 {len(download_urls)} 份文件",
             "DownloadUrl": ";".join(download_urls),
             "Attachments": attachments,
             "is_comparison_done": is_comparison_done,
@@ -1094,7 +1105,7 @@ class ProcessService:
         调用远程解析小助 API，提交 PDF 文件并获取处理任务的 fileId。
         """
         import requests
-        parse_api_url = "http://tgintellidoc.paasst.cmbchina.cn/api/file-upload-ocr"
+        parse_api_url = "http://tgintellidoc.paasst.cn/api/file-upload-ocr"
         headers = {"channelId": "cntb", "Content-Type": "application/json"}
         payload = {
             "fileName": filename, 
@@ -1137,14 +1148,14 @@ class ProcessService:
     async def check_ocr_status(self) -> bool:
         """
         检查OCR服务是否开启。
-        发送特定请求到 http://ocr-external.paasuat.cmbchina.cn/cv/ocr，
+        发送特定请求到 http://ocr-external.paasuat.cn/cv/ocr，
         如果返回 message 包含 "[10005]调用识别模型接口错误"，则说明服务没打开，返回 False。
         否则认为服务已开启，返回 True。
         """
         try:
             import requests
             import asyncio
-            url = "http://ocr-external.paasuat.cmbchina.cn/cv/ocr"
+            url = "http://ocr-external.paasuat.cn/cv/ocr"
             payload = {
                 "channelCode": "882710489925676032",
                 "type": "t2c",
@@ -1339,7 +1350,7 @@ class ProcessService:
         from app.common.db.db_utils import DBUtils
         db = DBUtils()
         try:
-            remote_pool = ConnectionPool(host="tgidocst.tdsql.dbdns.cmbchina.cn", port=6666, user="app1", password="0s#fzZU1Rq", database="tgidoc", max_connections=5)
+            remote_pool = ConnectionPool(host="tgidocst.tdsql.dbdns.cn", port=6666, user="app1", password="0s#fzZU1Rq", database="tgidoc", max_connections=5)
             remote_db = MySQLConnector(remote_pool)
         except Exception as e:
             logger.error(f"Failed to connect to remote DB tgidoc: {e}")
@@ -1349,16 +1360,19 @@ class ProcessService:
             try: await self._evaluate_single_file(info, remote_db, db)
             except Exception as e: logger.error(f"Parse and evaluate failed for {info.get('file_id')}: {e}")
             
-        try:
-            db.execute_update("UPDATE ai_testcase_generate_record SET is_comparison_done = 1 WHERE test_case_id = %s", (test_case_id,))
-        except Exception as e:
-            logger.error(f"Failed to update is_comparison_done: {e}")
-
         # 汇总统计 comparison_info 表
         try:
             self._save_comparison_info(test_case_id, db)
         except Exception as e:
             logger.error(f"Failed to save comparison_info: {e}")
+
+        try:
+            db.execute_update(
+                "UPDATE ai_testcase_generate_record SET is_comparison_done = 1, update_time = NOW() WHERE test_case_id = %s",
+                (test_case_id,)
+            )
+        except Exception as e:
+            logger.error(f"Failed to update is_comparison_done: {e}")
 
     def _build_filename(self, test_case_id: str, file_type: str, file_sub_type: str, extension: str, count: int = None):
         """
@@ -1608,6 +1622,9 @@ class ProcessService:
             if not rows:
                 logger.warning(f"No comparison data found for test_case_id: {test_case_id}")
                 return
+
+            # 先删除该批次已有汇总记录，避免重复插入导致前端统计失真
+            db.execute_update("DELETE FROM comparison_info WHERE test_case_id = %s", (test_case_id,))
 
             # 准备批量插入数据
             for row in rows:

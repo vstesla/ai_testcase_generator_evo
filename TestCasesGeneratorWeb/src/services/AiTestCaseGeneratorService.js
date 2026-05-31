@@ -144,7 +144,7 @@ export const AiTestCaseGeneratorService = {
         'GET_GENERATION_HISTORY',
         params
       );
-      return response; // 注意这里直接返回 response，因为业务代码里是通过 response.data.records 获取的
+      return response.data;
     } catch (error) {
       console.error('getGenerationHistory API Error:', error);
       throw new Error(error.response?.data?.detail || error.message || '获取历史记录失败');
@@ -164,7 +164,7 @@ export const AiTestCaseGeneratorService = {
         'GET_GENERATION_RESULT',
         { test_case_id }
       );
-      return response; // 同样返回外层结构
+      return response.data;
     } catch (error) {
       console.error('getGenerationResult API Error:', error);
       throw new Error(error.response?.data?.detail || error.message || '获取生成详情失败');
@@ -182,7 +182,7 @@ export const AiTestCaseGeneratorService = {
         'AI_TESTCASE_GENERATOR',
         'GET_OCR_STATUS'
       );
-      return response;
+      return response.data;
     } catch (error) {
       console.error('getOcrStatus API Error:', error);
       throw new Error(error.response?.data?.detail || error.message || '获取OCR服务状态失败');
