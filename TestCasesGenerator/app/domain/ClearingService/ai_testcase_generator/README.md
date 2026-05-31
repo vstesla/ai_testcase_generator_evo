@@ -166,6 +166,14 @@ curl -X GET "http://127.0.0.1:8000/ai_testcase_generator/comparison_result?test_
 ## 5. 内部流程与数据存储
 
 ### 5.1 核心技术实现点
+- **最新架构与特性**:
+  - **并发性能与稳定性飞跃**: 彻底修复了 FastAPI 同步数据库查询导致的线程池死锁，以及高并发请求下的 504 Gateway Timeout 报错，优化了 MySQL 默认事务隔离与连接泄漏的问题，保证了系统在前台多轮询环境下的绝对稳定。
+  - **异步架构升级**: 引入 `Celery` + `Redis` 异步任务队列，彻底解决大批量（如 300 份）协议生成导致的 HTTP 接口超时问题。
+  - **大模型底座切换**: 切换至 `DeepSeek` (`deepseek-v4-flash`)，采用 OpenAI SDK 兼容模式并开启 `JSON Output` 强制规范输出，完美解决裸数字、代码表达式等解析失败问题。
+  - **稳定性增强**: 针对 AI 网关波动，引入 `Tenacity` 指数退避重试策略；同时在 Excel/PDF 渲染引擎中加入正则过滤机制，防御大模型生成的 `<script>` 或不可见控制字符导致引擎崩溃。
+  - 新增支持“标的合同” (`ZLFJ_BDHT`) 业务场景的自动生成及评测白名单比对。
+  - 重构了通用文件流生成逻辑，修复了单文件下载强制打 ZIP 包的问题。
+  - 新增 `/generation_history` 和 `/generation_result` 接口，前后端使用唯一的 `TestCaseID` 透传状态，支持多维度分页历史查询。
 - **ReportLab PDF 渲染引擎**：支持高度定制化的样式排版、复杂表格合并及多段落混合渲染，并在底层解决了中英文混合字体的适配问题。
 - **并发锁机制控制**：在处理多文件批量上传 COS 时，引入了 `asyncio.Lock()` 机制，有效避免了高并发场景下由于数据库 ID 自增逻辑（`file_id_generator`）引发的**主键冲突 (Race Condition)**，保障了批量生成的稳定性。
 - **文件流式传输**：摒弃传统本地落盘后再下载的模式，采用内存流（`BytesIO`）配合 FastAPI 的 `StreamingResponse` 极大地降低了服务器 IO 压力。
