@@ -1180,18 +1180,18 @@ class ProcessService:
         return []
 
     def _is_local_ocr_enabled(self) -> bool:
-        return bool(os.getenv("LOCAL_OCR_URL"))
+        return os.getenv("USE_IN_PROCESS_OCR", "true").lower() == "true" or bool(os.getenv("LOCAL_OCR_URL"))
 
     async def _call_local_ocr(self, info: Dict[str, Any]) -> Dict[str, Any]:
         """
-        调用本地 OCR 服务。服务返回纯文本后，后端按预期字段做包含式匹配，
+        调用本地 OCR 服务（或直接使用进程内 OCR）。服务返回纯文本后，后端按预期字段做包含式匹配，
         用于替代原项目内网解析小助的字段结构化能力。
         """
         import requests
-
+        from pathlib import Path
+        
+        use_in_process = os.getenv("USE_IN_PROCESS_OCR", "true").lower() == "true"
         local_ocr_url = os.getenv("LOCAL_OCR_URL", "").rstrip("/")
-        if not local_ocr_url:
-            return {}
 
         file_id = info["file_id"]
         filename = info.get("filename") or f"{file_id}.pdf"
@@ -1200,16 +1200,23 @@ class ProcessService:
 
         try:
             await asyncio.to_thread(self.object_storage.download_file, file_id, local_path)
-            with open(local_path, "rb") as fp:
-                files = {"file": (filename, fp, "application/pdf")}
-                response = await asyncio.to_thread(
-                    requests.post,
-                    f"{local_ocr_url}/ocr",
-                    files=files,
-                    timeout=float(os.getenv("LOCAL_OCR_TIMEOUT", "120")),
-                )
-            response.raise_for_status()
-            return response.json()
+            
+            if use_in_process:
+                from app.domain.ClearingService.ai_testcase_generator.ocr_engine import process_file_in_process
+                suffix = Path(filename).suffix.lower() or ".pdf"
+                return await asyncio.to_thread(process_file_in_process, local_path, suffix)
+            elif local_ocr_url:
+                with open(local_path, "rb") as fp:
+                    files = {"file": (filename, fp, "application/pdf")}
+                    response = await asyncio.to_thread(
+                        requests.post,
+                        f"{local_ocr_url}/ocr",
+                        files=files,
+                        timeout=float(os.getenv("LOCAL_OCR_TIMEOUT", "120")),
+                    )
+                response.raise_for_status()
+                return response.json()
+            return {}
         finally:
             if os.path.exists(local_path):
                 try:
@@ -1259,6 +1266,11 @@ class ProcessService:
         try:
             import requests
             import asyncio
+            
+            use_in_process = os.getenv("USE_IN_PROCESS_OCR", "true").lower() == "true"
+            if use_in_process:
+                return True
+                
             local_ocr_url = os.getenv("LOCAL_OCR_URL", "").rstrip("/")
             if local_ocr_url:
                 response = await asyncio.to_thread(requests.get, f"{local_ocr_url}/health", timeout=10.0)
