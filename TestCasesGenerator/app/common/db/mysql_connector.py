@@ -297,7 +297,7 @@ class MySQLConnector:
                 return False
 
         return True
-    
+
     def execute_query(self, query: str, params: tuple = None) -> List[Dict[str, Any]]:
         """执行查询语句"""
         conn = self.pool.get_connection()
@@ -322,7 +322,7 @@ class MySQLConnector:
             with conn.cursor() as cursor:
                 cursor.execute(query, params)
                 conn.commit()
-                return cursor.lastrowid
+                return cursor.lastrowid or cursor.rowcount
         except Exception as e:
             print(f"更新执行失败: {e}")
             conn.rollback()
@@ -395,21 +395,28 @@ def create_tyystool_connection():
             print(f"[PROD] 当前为生产环境，连接到数据库: {database_name}")
             os.environ["DB_ENV_INFO_PRINTED"] = "1"
 
-    # 使用默认配置创建连接池
+    db_host = os.getenv("DB_HOST", "127.0.0.1")
+    db_port = int(os.getenv("DB_PORT", "3306"))
+    db_user = os.getenv("DB_USER", "root")
+    db_password = os.getenv("DB_PASSWORD", "")
+    database_name = os.getenv("DB_NAME", database_name)
+    max_connections = int(os.getenv("DB_MAX_CONNECTIONS", "20"))
+    min_idle_connections = int(os.getenv("DB_MIN_IDLE_CONNECTIONS", "1"))
+
+    # 使用环境变量创建连接池，便于 Docker 本地部署
     pool = ConnectionPool(
-        host="127.0.0.1",
-        port=3306,
-        user="root",
-        password="",
+        host=db_host,
+        port=db_port,
+        user=db_user,
+        password=db_password,
         database=database_name,
         charset="utf8mb4",
-        max_connections=20,  # 增加最大连接数
-        min_idle_connections=5,  # 减少最小空闲连接数，避免连接风暴
-        max_idle_time=300  # 增加空闲时间
+        max_connections=max_connections,
+        min_idle_connections=min_idle_connections,
+        max_idle_time=300
     )
 
     # 创建MySQLConnector实例并缓存
     _connection_pool_instance = MySQLConnector(pool)
     return _connection_pool_instance
-          
-    
+
