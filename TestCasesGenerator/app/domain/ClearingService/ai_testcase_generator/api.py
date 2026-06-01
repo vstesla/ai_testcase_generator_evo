@@ -165,7 +165,8 @@ async def generate_attachments(
         file_count: Optional[int] = Form(1, ge=0, description="需要生成的指令附件pdf的数量"),
         enable_generalization: bool = Form(False, description="泛化开关"),
         enable_adversarial: bool = Form(False, description="对抗生成开关"),
-        enable_comparison: bool = Form(True, description="是否开启自动比对评测")
+        enable_comparison: bool = Form(True, description="是否开启自动比对评测"),
+        selected_comparison_fields: Optional[str] = Form(None, description="前端用户选中的比对字段key，以逗号分隔")
 ):
     """
     指令附件生成接口：
@@ -244,7 +245,8 @@ async def generate_attachments(
             file_path_identifier=FILE_PATH_IDENTIFIER,
             timestamp=timestamp,
             enable_comparison=enable_comparison,
-            test_case_id_batch=test_case_id  # 传入同一个 test_case_id
+            test_case_id_batch=test_case_id,  # 传入同一个 test_case_id
+            selected_comparison_fields=selected_comparison_fields
         )
         
         # 立即返回，不阻塞
@@ -269,6 +271,45 @@ async def generate_attachments(
         raise HTTPException(status_code=500, detail=str(e))
     # 注意：这里去掉了 finally 里的清理临时文件逻辑，
     # 因为 Celery 工作进程还需要读取这俩文件。文件清理应该放在任务内部或后续步骤。
+
+@router.get("/comparison_fields")
+async def get_comparison_fields(
+    business_process: str = Query(..., description="业务流程"),
+    file_name: Optional[str] = Query(None, description="上传的文件名")
+):
+    """
+    获取不同业务流程支持的比对字段，并可根据文件名自动解析选中的字段。
+    """
+    all_fields = []
+    field_map = {}
+    
+    if business_process == "标的合同":
+        field_map = process_service.BDHT_FIELD_NAME_MAP
+    elif business_process in ["缴款通知书", "认购协议"]:
+        field_map = process_service.ELEMENT_NAME_MAP
+        
+    for k, v in field_map.items():
+        all_fields.append({"label": v, "value": k})
+        
+    parsed_selected_values = None
+    if file_name:
+        import re
+        # 支持解析 - 后面的字段，用 _ 隔开
+        m = re.search(r'-([^-]*?)\.[a-zA-Z0-9]+$', file_name)
+        if m:
+            field_str = m.group(1)
+            chinese_fields = field_str.split('_')
+            reverse_map = {v: k for k, v in field_map.items()}
+            parsed_selected_values = [reverse_map[f] for f in chinese_fields if f in reverse_map]
+            
+    return {
+        "code": 200,
+        "message": "success",
+        "data": {
+            "all_fields": all_fields,
+            "parsed_selected_values": parsed_selected_values
+        }
+    }
 
 @router.get("/download_files")
 async def download_files(

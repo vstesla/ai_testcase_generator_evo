@@ -144,9 +144,51 @@ const MainPage = () => {
     const [adversarialEnabled, setAdversarialEnabled] = useState(false);
     const [comparisonEnabled, setComparisonEnabled] = useState(true);
 
+    // 比对字段相关状态
+    const [comparisonFieldOptions, setComparisonFieldOptions] = useState([]);
+    const [selectedComparisonFields, setSelectedComparisonFields] = useState([]);
+    const [isComparisonFieldsLoading, setIsComparisonFieldsLoading] = useState(false);
+
     // 文件上传状态
     const [fileList, setFileList] = useState([]);
     const [templateFileList, setTemplateFileList] = useState([]);
+
+    // 获取比对字段数据
+    useEffect(() => {
+        const fetchFields = async () => {
+            if (!comparisonEnabled || functionType === '测试集泛化') {
+                return;
+            }
+            setIsComparisonFieldsLoading(true);
+            try {
+                const params = { business_process: businessProcess };
+                // 优先使用模板文件名解析比对字段
+                if (templateFileList.length > 0 && templateFileList[0]?.name) {
+                    params.file_name = templateFileList[0].name;
+                } else if (fileList.length > 0 && fileList[0]?.name) {
+                    // 如果没有模板，尝试使用测试集文件名
+                    params.file_name = fileList[0].name;
+                }
+                const response = await AiTestCaseGeneratorService.getComparisonFields(params);
+                if (response && response.code === 200 && response.data) {
+                    const { all_fields, parsed_selected_values } = response.data;
+                    setComparisonFieldOptions(all_fields || []);
+                    if (parsed_selected_values && parsed_selected_values.length > 0) {
+                        setSelectedComparisonFields(parsed_selected_values);
+                    } else {
+                        // 默认全选
+                        setSelectedComparisonFields((all_fields || []).map(f => f.value));
+                    }
+                }
+            } catch (error) {
+                console.error('获取比对字段失败', error);
+                message.error('获取比对字段失败');
+            } finally {
+                setIsComparisonFieldsLoading(false);
+            }
+        };
+        fetchFields();
+    }, [businessProcess, fileList, templateFileList, comparisonEnabled, functionType]);
 
     // 处理文件上传
     const handleUpload = (info) => {
@@ -464,6 +506,7 @@ const MainPage = () => {
                     enable_generalization: generalizationEnabled,
                     enable_adversarial: adversarialEnabled,
                     enable_comparison: comparisonEnabled,
+                    selected_comparison_fields: comparisonEnabled ? selectedComparisonFields.join(',') : undefined
                 };
 
                 if (REQUIRES_TEMPLATE_PROCESSES.includes(businessProcess)) {
@@ -1369,6 +1412,29 @@ const MainPage = () => {
                             disabled={functionType === '测试集泛化'}
                         />
                     </div>
+
+                    {functionType !== '测试集泛化' && (
+                        <div className="ai-tcg-switch-item">
+                            <span className="ai-tcg-switch-label" style={{ color: comparisonEnabled ? 'inherit' : 'rgba(0, 0, 0, 0.25)' }}>比对字段</span>
+                            <Select
+                                mode="multiple"
+                                style={{ width: 260 }}
+                                placeholder="请选择比对字段"
+                                value={selectedComparisonFields}
+                                onChange={setSelectedComparisonFields}
+                                disabled={!comparisonEnabled}
+                                loading={isComparisonFieldsLoading}
+                                maxTagCount="responsive"
+                                allowClear
+                            >
+                                {comparisonFieldOptions.map(field => (
+                                    <Select.Option key={field.value} value={field.value}>
+                                        {field.label}
+                                    </Select.Option>
+                                ))}
+                            </Select>
+                        </div>
+                    )}
                 </div>
 
                 {/* 第二行：所有开关 */}

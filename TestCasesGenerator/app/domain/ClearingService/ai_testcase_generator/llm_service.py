@@ -13,7 +13,9 @@ from app.domain.ClearingService.ai_testcase_generator.agents import (
     adversarial,
     ckxy,
     jktzs,
-    jktzs_adversarial
+    jktzs_adversarial,
+    bdht,
+    bdht_adversarial
 )
 
 logger = logging.getLogger(__name__)
@@ -134,4 +136,14 @@ class LLMService:
     def generate_jktzs_adversarial(self, **kwargs) -> Any:
         """生成缴款通知书 (jktzs_adversarial) 测试集的对抗攻击数据"""
         messages = jktzs_adversarial.get_messages(kwargs)
+        return self._call_deepseek_api(messages, fallback_val=kwargs)
+
+    def generate_bdht(self, **kwargs) -> Any:
+        """生成标的合同 (bdht) 测试集的泛化数据"""
+        messages = bdht.get_messages(kwargs)
+        return self._call_deepseek_api(messages, fallback_val=kwargs)
+
+    def generate_bdht_adversarial(self, **kwargs) -> Any:
+        """生成标的合同 (bdht_adversarial) 测试集的对抗攻击数据"""
+        messages = bdht_adversarial.get_messages(kwargs)
         return self._call_deepseek_api(messages, fallback_val=kwargs)

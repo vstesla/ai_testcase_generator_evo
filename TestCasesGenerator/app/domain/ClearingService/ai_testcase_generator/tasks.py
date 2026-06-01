@@ -19,7 +19,8 @@ def generate_attachments_task(
     file_path_identifier: str, 
     timestamp: int, 
     enable_comparison: bool,
-    test_case_id_batch: str = None
+    test_case_id_batch: str = None,
+    selected_comparison_fields: str = None
 ):
     """
     异步任务：大批量处理指令附件的生成
@@ -30,7 +31,7 @@ def generate_attachments_task(
         process_service = ProcessService()
         try:
             # 1. 核心生成逻辑
-            result = await process_service.process_jktzs_attachment(
+            result = await process_service.process_file_attachment(
                 business_process=business_process,
                 jktzs_file_path=jktzs_file_path,
                 jktzs_template_path=jktzs_template_path,
@@ -41,17 +42,20 @@ def generate_attachments_task(
                 timestamp=timestamp,
                 enable_comparison=enable_comparison,
                 test_case_id_batch=test_case_id_batch,
-                defer_comparison_task=True
+                defer_comparison_task=True,
+                selected_comparison_fields=selected_comparison_fields
             )
             
             # 2. 结果落库
             _record_generation_result(result)
 
-            # 3. 生成完成后，单独分发比对任务，避免 Celery 当前事件循环关闭导致 create_task 丢失
+            # 3. 生成完成后，单独分发比通任务，避免 Celery 当前事件循环关闭导致 create_task 丢失
             if enable_comparison and result.get("TestCaseGenStatus") == "Y" and result.get("generated_file_info"):
                 compare_attachments_task.delay(
                     test_case_id=result["TestCaseID"],
-                    generated_file_info=result["generated_file_info"]
+                    generated_file_info=result["generated_file_info"],
+                    business_process=business_process,
+                    selected_comparison_fields=selected_comparison_fields
                 )
             return result
             
@@ -87,12 +91,17 @@ def generate_attachments_task(
 
 
 @celery_app.task(bind=True)
-def compare_attachments_task(self, test_case_id: str, generated_file_info):
+def compare_attachments_task(self, test_case_id: str, generated_file_info, business_process: str = None, selected_comparison_fields: str = None):
     """异步任务：处理解析与比对，完成后更新 comparison_info 与 is_comparison_done。"""
 
     async def _run_compare():
         process_service = ProcessService()
-        await process_service._parse_and_evaluate(test_case_id, generated_file_info)
+        await process_service._parse_and_evaluate(
+            test_case_id=test_case_id, 
+            generated_file_info=generated_file_info,
+            business_process=business_process,
+            selected_comparison_fields=selected_comparison_fields
+        )
         return {"test_case_id": test_case_id, "is_comparison_done": True}
 
     try:

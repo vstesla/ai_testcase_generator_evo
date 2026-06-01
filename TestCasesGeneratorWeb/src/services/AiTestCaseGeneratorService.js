@@ -23,6 +23,7 @@ export const AiTestCaseGeneratorService = {
    * @param {boolean} params.enable_generalization - 是否开启泛化
    * @param {boolean} params.enable_adversarial - 是否开启对抗生成
    * @param {boolean} params.enable_comparison - 是否开启比对评测
+   * @param {string} [params.selected_comparison_fields] - 前端用户选中的比对字段key，以逗号分隔
    * @returns {Promise<Object>} 后端返回的生成结果
    */
   generateAttachments: async (params) => {
@@ -45,6 +46,10 @@ export const AiTestCaseGeneratorService = {
     
     if (params.enable_comparison !== undefined) {
       formData.append('enable_comparison', params.enable_comparison);
+    }
+
+    if (params.selected_comparison_fields !== undefined && params.selected_comparison_fields !== null) {
+      formData.append('selected_comparison_fields', params.selected_comparison_fields);
     }
 
     // 条件必填参数：需要模板的流程需要测试集文件和模板文件
@@ -126,6 +131,28 @@ export const AiTestCaseGeneratorService = {
     } catch (error) {
       console.error('getComparisonResult API Error:', error);
       throw new Error(error.response?.data?.detail || error.message || '接口请求失败');
+    }
+  },
+
+  /**
+   * 获取不同业务流程支持的比对字段
+   * 
+   * @param {Object} params - 请求参数
+   * @param {string} params.business_process - 业务流程
+   * @param {string} [params.file_name] - 上传的文件名
+   * @returns {Promise<Object>} 后端返回的比对字段列表
+   */
+  getComparisonFields: async (params) => {
+    try {
+      const response = await unifiedApiService.get(
+        'AI_TESTCASE_GENERATOR',
+        'GET_COMPARISON_FIELDS',
+        params
+      );
+      return response.data;
+    } catch (error) {
+      console.error('getComparisonFields API Error:', error);
+      throw new Error(error.response?.data?.detail || error.message || '获取比对字段失败');
     }
   },
 

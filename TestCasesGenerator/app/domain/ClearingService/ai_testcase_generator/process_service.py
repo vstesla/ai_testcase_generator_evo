@@ -511,7 +511,7 @@ class ProcessService:
             "is_comparison_done": is_comparison_done
         }
 
-    async def _save_jktzs_intermediate(self, df_list, prefix, timestamp, file_path_identifier):
+    async def _save_file_intermediate(self, df_list, prefix, timestamp, file_path_identifier):
         """
         保存缴款通知书的中间过程数据（如泛化、对抗后的结果）为 Excel，并上传 COS。
         """
@@ -553,14 +553,15 @@ class ProcessService:
         # 考虑到是在 Celery 任务内部运行，直接 await 更加安全，能确保文件上传完成且进程不会提前结束
         await _upload_task()
 
-    async def _do_jktzs_generalization(self, test_audit_id, raw_data, current_data):
+    async def _do_file_generalization(self, test_audit_id, raw_data, current_data, business_process):
         """
-        调用大模型对单笔缴款通知书数据进行泛化生成。
+        调用大模型对单笔附件数据进行泛化生成。
 
         Args:
             test_audit_id: 测试审计ID
             raw_data: 原始数据字典（用于LLM输入）
             current_data: 当前数据字典（将被更新）
+            business_process: 业务流程名称
         """
         try:
             import asyncio
@@ -568,7 +569,10 @@ class ProcessService:
             logger.info(f"[Generalization] Starting for test_audit_id: {test_audit_id}")
             logger.debug(f"[Generalization] Input raw_data: {raw_data}")
 
-            gen_result = await asyncio.to_thread(self.llm_service.generate_jktzs, **raw_data)
+            if business_process == "标的合同":
+                gen_result = await asyncio.to_thread(self.llm_service.generate_bdht, **raw_data)
+            else:
+                gen_result = await asyncio.to_thread(self.llm_service.generate_jktzs, **raw_data)
             logger.debug(f"[Generalization] LLM returned type: {type(gen_result).__name__}")
             logger.debug(f"[Generalization] LLM returned value: {gen_result}")
 
@@ -594,13 +598,14 @@ class ProcessService:
             import traceback
             logger.error(traceback.format_exc())
 
-    async def _do_jktzs_adversarial(self, test_audit_id, current_data):
+    async def _do_file_adversarial(self, test_audit_id, current_data, business_process):
         """
-        调用大模型对单笔缴款通知书数据进行对抗样本生成。
+        调用大模型对单笔数据进行对抗样本生成。
 
         Args:
             test_audit_id: 测试审计ID
             current_data: 当前数据字典（将被更新，包含泛化后的数据）
+            business_process: 业务流程名称
         """
         try:
             import asyncio
@@ -608,7 +613,10 @@ class ProcessService:
             logger.info(f"[Adversarial] Starting for test_audit_id: {test_audit_id}")
             logger.debug(f"[Adversarial] Input current_data: {current_data}")
 
-            adv_result = await asyncio.to_thread(self.llm_service.generate_jktzs_adversarial, **current_data)
+            if business_process == "标的合同":
+                adv_result = await asyncio.to_thread(self.llm_service.generate_bdht_adversarial, **current_data)
+            else:
+                adv_result = await asyncio.to_thread(self.llm_service.generate_jktzs_adversarial, **current_data)
             logger.debug(f"[Adversarial] LLM returned type: {type(adv_result).__name__}")
             logger.debug(f"[Adversarial] LLM returned value: {adv_result}")
 
@@ -640,7 +648,7 @@ class ProcessService:
         """
         df_list.extend([{**row.to_dict(), 'ELEMENT_VALUE': current_data.get(str(row['ELEMENT_KEY']), row['ELEMENT_VALUE'])} for _, row in group.iterrows()])
 
-    async def _prepare_jktzs_data(self, jktzs_file_path: str, enable_generalization: bool, enable_adversarial: bool, timestamp: int, file_path_identifier: str) -> Dict[str, Any]:
+    async def _prepare_file_data(self, jktzs_file_path: str, enable_generalization: bool, enable_adversarial: bool, timestamp: int, file_path_identifier: str, business_process: str) -> Dict[str, Any]:
         """
         准备缴款通知书数据：读取 Excel，根据开关决定是否调用 LLM 进行泛化和对抗生成。
         """
@@ -656,11 +664,11 @@ class ProcessService:
             current_data = raw_data.copy()
             
             if enable_generalization:
-                await self._do_jktzs_generalization(test_audit_id, raw_data, current_data)
+                await self._do_file_generalization(test_audit_id, raw_data, current_data, business_process)
                 self._extend_df_list(fh_df_list, group, current_data)
                     
             if enable_adversarial:
-                await self._do_jktzs_adversarial(test_audit_id, current_data)
+                await self._do_file_adversarial(test_audit_id, current_data, business_process)
                 if not enable_generalization:
                     self._extend_df_list(dk_df_list, group, current_data)
                         
@@ -669,11 +677,11 @@ class ProcessService:
                 
             processed_data_map[test_audit_id] = current_data
             
-        if enable_generalization and not enable_adversarial: await self._save_jktzs_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
-        elif not enable_generalization and enable_adversarial: await self._save_jktzs_intermediate(dk_df_list, "DK", timestamp, file_path_identifier)
+        if enable_generalization and not enable_adversarial: await self._save_file_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
+        elif not enable_generalization and enable_adversarial: await self._save_file_intermediate(dk_df_list, "DK", timestamp, file_path_identifier)
         elif enable_generalization and enable_adversarial:
-            await self._save_jktzs_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
-            await self._save_jktzs_intermediate(final_df_list, "", timestamp, file_path_identifier)
+            await self._save_file_intermediate(fh_df_list, "FH", timestamp, file_path_identifier)
+            await self._save_file_intermediate(final_df_list, "", timestamp, file_path_identifier)
             
         return processed_data_map
 
@@ -895,7 +903,7 @@ class ProcessService:
                 table_index += 1
         return pdf_paragraphs
 
-    async def _render_single_jktzs_pdf(self, idx, test_case_id, data, business_process, time_str_batch, file_path_identifier, paragraphs_template, tables_template, tables_col_widths, styles_tuple, jktzs_template_path):
+    async def _render_single_file_pdf(self, idx, test_case_id, data, business_process, time_str_batch, file_path_identifier, paragraphs_template, tables_template, tables_col_widths, styles_tuple, jktzs_template_path):
         """
         根据单笔数据和模板，渲染生成单份缴款通知书 PDF 文件并上传 COS。
 
@@ -941,7 +949,7 @@ class ProcessService:
                 except OSError as e: 
                     logger.warning(f"Failed to clean up generated PDF file {local_pdf_path}: {e}")
 
-    async def _render_jktzs_pdfs(self, processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path, test_case_id_batch=None):
+    async def _render_file_pdfs(self, processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path, test_case_id_batch=None):
         """
         批量循环处理测试数据，生成指定数量的缴款通知书 PDF 文件。
         """
@@ -960,7 +968,7 @@ class ProcessService:
         for idx, source_audit_id in enumerate(target_audit_ids):
             try:
                 data = processed_data_map[source_audit_id]
-                info = await self._render_single_jktzs_pdf(idx, test_case_id_batch, data, business_process, time_str_batch, file_path_identifier, paragraphs_template, tables_template, tables_col_widths, styles_tuple, jktzs_template_path)
+                info = await self._render_single_file_pdf(idx, test_case_id_batch, data, business_process, time_str_batch, file_path_identifier, paragraphs_template, tables_template, tables_col_widths, styles_tuple, jktzs_template_path)
                 download_urls.append(info["download_url"])
                 attachments.append({"attachment_id": info["file_id"], "download_url": info["download_url"]})
                 generated_file_info.append(info)
@@ -988,11 +996,26 @@ class ProcessService:
         "PayeeShort": "收款人简称"
     }
 
-    async def process_jktzs_attachment(
+    BDHT_FIELD_NAME_MAP = {
+        "bdcplx": "标的产品类型",
+        "bdcptzfw": "标的产品投资范围",
+        "fkxjtj": "放款先决条件",
+        "fklj": "放款路径",
+        "sfhm": "收方户名",
+        "sfzh": "收方账号",
+        "yt": "用途",
+        "syqzr": "受益权转让",
+        "xjtj": "先决条件",
+        "zrjg": "转让价格",
+        "sxtj": "转让金额"
+    }
+
+    async def process_file_attachment(
         self, business_process: str, jktzs_file_path: str, jktzs_template_path: str,
         file_count: int, enable_generalization: bool, enable_adversarial: bool,
         file_path_identifier: str, timestamp: int, enable_comparison: bool = True,
-        test_case_id_batch: str = None, defer_comparison_task: bool = False
+        test_case_id_batch: str = None, defer_comparison_task: bool = False,
+        selected_comparison_fields: str = None
     ) -> Dict[str, Any]:
         """
         处理缴款通知书附件生成的总入口函数：
@@ -1001,24 +1024,35 @@ class ProcessService:
         3. 渲染生成多份 PDF 并上传至 COS
         4. 触发异步解析小助比对任务 (若开启)
         """
-        logger.info(f"Start processing JKTZS. Gen: {enable_generalization}, Adv: {enable_adversarial}, Count: {file_count}")
+        logger.info(f"Start processing file. Gen: {enable_generalization}, Adv: {enable_adversarial}, Count: {file_count}")
         
         # 1. 准备测试数据 (包含可能的 LLM 泛化/对抗调用)
-        processed_data_map = await self._prepare_jktzs_data(jktzs_file_path, enable_generalization, enable_adversarial, timestamp, file_path_identifier)
+        processed_data_map = await self._prepare_file_data(jktzs_file_path, enable_generalization, enable_adversarial, timestamp, file_path_identifier, business_process)
         
         # 2. 提取模板中的段落和表格骨架
         paragraphs_template, tables_template, tables_col_widths = self._parse_docx_template(jktzs_template_path)
         
         # 3. 循环填充数据，生成多份 PDF 文件并上传 COS
-        download_urls, attachments, generated_file_info, final_test_case_id = await self._render_jktzs_pdfs(
+        download_urls, attachments, generated_file_info, final_test_case_id = await self._render_file_pdfs(
             processed_data_map, paragraphs_template, tables_template, tables_col_widths, business_process, file_count, file_path_identifier, timestamp, jktzs_template_path, test_case_id_batch
         )
+
+        # 针对前端选择的比对字段过滤
+        if selected_comparison_fields is not None:
+            keys = selected_comparison_fields.split(',') if selected_comparison_fields else []
+            for info in generated_file_info:
+                info['selected_comparison_fields'] = keys
         
         # 4. 若开启对比开关，则触发后台异步轮询评测任务
         if enable_comparison:
             if not defer_comparison_task:
                 import asyncio
-                asyncio.create_task(self._parse_and_evaluate(final_test_case_id, generated_file_info))
+                asyncio.create_task(self._parse_and_evaluate(
+                    test_case_id=final_test_case_id, 
+                    generated_file_info=generated_file_info,
+                    business_process=business_process,
+                    selected_comparison_fields=selected_comparison_fields
+                ))
             is_comparison_done = False
         else:
             is_comparison_done = True
@@ -1331,6 +1365,12 @@ class ProcessService:
         file_sub_type = self._get_file_sub_type(file_type, template_filename)
         self._adjust_whitelist(file_type, template_filename, strict_fields, fuzzy_fields)
 
+        # 针对前端选择的比对字段过滤
+        selected_keys = info.get("selected_comparison_fields")
+        if selected_keys is not None:
+            strict_fields = {k for k in strict_fields if k in selected_keys}
+            fuzzy_fields = {k for k in fuzzy_fields if k in selected_keys}
+
         total_valid_fields, all_pass, any_pass = self._evaluate_fields(expected_data, parsed_values, current_whitelist, strict_fields, fuzzy_fields, file_type, file_sub_type, audit_id, file_id, handle_file_id, db)
 
         if not expected_data: eval_res = "解析完成(无预期数据)"
@@ -1342,13 +1382,20 @@ class ProcessService:
         db.execute_update("INSERT INTO ai_evaluation_result (test_case_id, file_id, evaluation_result, create_time, update_time) VALUES (%s, %s, %s, NOW(), NOW())", (audit_id, file_id, eval_res))
         logger.info(f"Successfully evaluated file {file_id}: {eval_res}")
 
-    async def _parse_and_evaluate(self, test_case_id: str, generated_file_info: List[Dict]):
+    async def _parse_and_evaluate(self, test_case_id: str, generated_file_info: List[Dict], business_process: str = None, selected_comparison_fields: str = None):
         """
         后台异步任务：批量处理已生成的 PDF，调用解析并比对，最后将评测结果批量写入数据库。
         """
         from app.common.db.mysql_connector import ConnectionPool, MySQLConnector
         from app.common.db.db_utils import DBUtils
         db = DBUtils()
+        
+        # 把 selected_comparison_fields 注入到每个 info 中
+        if selected_comparison_fields is not None:
+            keys = selected_comparison_fields.split(',') if selected_comparison_fields else []
+            for info in generated_file_info:
+                info['selected_comparison_fields'] = keys
+                
         try:
             remote_pool = ConnectionPool(host="tgidocst.tdsql.dbdns.cn", port=6666, user="app1", password="0s#fzZU1Rq", database="tgidoc", max_connections=5)
             remote_db = MySQLConnector(remote_pool)
