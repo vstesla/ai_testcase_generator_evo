@@ -13,6 +13,7 @@ endpoint = os.getenv('COS_ENDPOINT', 'https://cos.ap-guangzhou.myqcloud.com')
 region = os.getenv('COS_REGION', 'ap-guangzhou')
 verifyIsNot = False
 bucketName = os.getenv('COS_BUCKET_NAME', 'testcasesgeneratorcos-1304137470')
+addressing_style = os.getenv('COS_ADDRESSING_STYLE', 'virtual')
 
 def file_id_generator():
     if not DB.connect():
@@ -42,7 +43,7 @@ class ObjectStorage:
             endpoint_url=endpoint,
             region_name=region,
             verify=verifyIsNot,
-            config=Config(signature_version='s3v4', s3={'addressing_style': 'virtual'})
+            config=Config(signature_version='s3v4', s3={'addressing_style': addressing_style})
         )
 
     def upload_file(self,upload_file_path: str, storage_path: str,user_id: str, user_name: str) -> str:

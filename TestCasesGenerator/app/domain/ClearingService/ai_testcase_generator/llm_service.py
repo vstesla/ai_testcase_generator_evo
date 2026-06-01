@@ -13,9 +13,7 @@ from app.domain.ClearingService.ai_testcase_generator.agents import (
     adversarial,
     ckxy,
     jktzs,
-    jktzs_adversarial,
-    bdht,
-    bdht_adversarial
+    jktzs_adversarial
 )
 
 logger = logging.getLogger(__name__)
@@ -26,14 +24,13 @@ class LLMService:
     统一管理和数据清洗解析 LLM 返回的数据。
     """
     def __init__(self):
-        # 优先从环境变量获取 DEEPSEEK_API_KEY，如果没有则使用默认值
-        api_key = os.environ.get("DEEPSEEK_API_KEY", "sk-f2e82e6bca1643909869b5ef4c6c4e74")
+        api_key = os.environ.get("DEEPSEEK_API_KEY", "")
         
         self.client = OpenAI(
             api_key=api_key,
-            base_url="https://api.deepseek.com"
+            base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
         )
-        self.model = "deepseek-v4-flash" # 使用用户指定的 deepseek-v4-flash 模型
+        self.model = os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
     # 设计指数退避重试策略应对可能的 AI 网关波动
     @retry(
@@ -136,14 +133,4 @@ class LLMService:
     def generate_jktzs_adversarial(self, **kwargs) -> Any:
         """生成缴款通知书 (jktzs_adversarial) 测试集的对抗攻击数据"""
         messages = jktzs_adversarial.get_messages(kwargs)
-        return self._call_deepseek_api(messages, fallback_val=kwargs)
-
-    def generate_bdht(self, **kwargs) -> Any:
-        """生成标的合同 (bdht) 测试集的泛化数据"""
-        messages = bdht.get_messages(kwargs)
-        return self._call_deepseek_api(messages, fallback_val=kwargs)
-
-    def generate_bdht_adversarial(self, **kwargs) -> Any:
-        """生成标的合同 (bdht_adversarial) 测试集的对抗攻击数据"""
-        messages = bdht_adversarial.get_messages(kwargs)
         return self._call_deepseek_api(messages, fallback_val=kwargs)

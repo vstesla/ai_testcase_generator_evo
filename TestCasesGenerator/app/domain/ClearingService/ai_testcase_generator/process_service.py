@@ -1179,17 +1179,92 @@ class ProcessService:
                 logger.error(f"Error querying remote DB: {qe}")
         return []
 
+    def _is_local_ocr_enabled(self) -> bool:
+        return bool(os.getenv("LOCAL_OCR_URL"))
+
+    async def _call_local_ocr(self, info: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        调用本地 OCR 服务。服务返回纯文本后，后端按预期字段做包含式匹配，
+        用于替代原项目内网解析小助的字段结构化能力。
+        """
+        import requests
+
+        local_ocr_url = os.getenv("LOCAL_OCR_URL", "").rstrip("/")
+        if not local_ocr_url:
+            return {}
+
+        file_id = info["file_id"]
+        filename = info.get("filename") or f"{file_id}.pdf"
+        os.makedirs(self.TEMP_DIR, exist_ok=True)
+        local_path = os.path.join(self.TEMP_DIR, f"ocr_{file_id}_{filename}")
+
+        try:
+            await asyncio.to_thread(self.object_storage.download_file, file_id, local_path)
+            with open(local_path, "rb") as fp:
+                files = {"file": (filename, fp, "application/pdf")}
+                response = await asyncio.to_thread(
+                    requests.post,
+                    f"{local_ocr_url}/ocr",
+                    files=files,
+                    timeout=float(os.getenv("LOCAL_OCR_TIMEOUT", "120")),
+                )
+            response.raise_for_status()
+            return response.json()
+        finally:
+            if os.path.exists(local_path):
+                try:
+                    os.remove(local_path)
+                except OSError:
+                    pass
+
+    def _value_appears_in_text(self, expected_value: Any, ocr_text: str) -> bool:
+        if expected_value is None:
+            return False
+
+        raw = str(expected_value).strip()
+        if not raw:
+            return False
+
+        compact_text = re.sub(r"\s+", "", ocr_text)
+        compact_text_no_comma = compact_text.replace(",", "")
+        compact_raw = re.sub(r"\s+", "", raw)
+        candidates = {
+            raw,
+            compact_raw,
+            compact_raw.replace(",", ""),
+            self._normalize_amount(raw),
+            self._normalize_date(raw),
+        }
+        candidates = {c for c in candidates if c}
+
+        for candidate in candidates:
+            candidate_compact = re.sub(r"\s+", "", str(candidate))
+            if candidate_compact and candidate_compact in compact_text:
+                return True
+            if candidate_compact.replace(",", "") and candidate_compact.replace(",", "") in compact_text_no_comma:
+                return True
+        return False
+
+    def _extract_local_ocr_values(self, expected_data: Dict[str, Any], ocr_payload: Dict[str, Any]) -> Dict[str, str]:
+        text = ocr_payload.get("text", "") if isinstance(ocr_payload, dict) else ""
+        parsed_values = {}
+        for key, expected_value in expected_data.items():
+            parsed_values[key] = str(expected_value).strip() if self._value_appears_in_text(expected_value, text) else ""
+        return parsed_values
+
     async def check_ocr_status(self) -> bool:
         """
         检查OCR服务是否开启。
-        发送特定请求到 http://ocr-external.paasuat.cn/cv/ocr，
-        如果返回 message 包含 "[10005]调用识别模型接口错误"，则说明服务没打开，返回 False。
-        否则认为服务已开启，返回 True。
         """
         try:
             import requests
             import asyncio
-            url = "http://ocr-external.paasuat.cn/cv/ocr"
+            local_ocr_url = os.getenv("LOCAL_OCR_URL", "").rstrip("/")
+            if local_ocr_url:
+                response = await asyncio.to_thread(requests.get, f"{local_ocr_url}/health", timeout=10.0)
+                return response.status_code == 200
+
+            url = os.getenv("OCR_STATUS_URL", "http://ocr-external.paasuat.cn/cv/ocr")
             payload = {
                 "channelCode": "882710489925676032",
                 "type": "t2c",
@@ -1339,17 +1414,27 @@ class ProcessService:
         audit_id = info["audit_id"]
         expected_data = info["data"]
 
-        # 步骤1: 调用解析API
+        # 步骤1: 调用本地 OCR 或远程解析 API
         file_type = self._get_file_type(info.get("business_process", "缴款通知书"))
-        handle_file_id = await self._call_parse_api(info.get("filename", ""), info.get("download_url", ""), file_type)
-        if not handle_file_id: return
 
-        # 步骤2: 轮询等待解析完成
-        parse_rows = await self._poll_parse_result(remote_db, handle_file_id)
-        if not parse_rows: return
+        if self._is_local_ocr_enabled():
+            handle_file_id = f"local-ocr-{file_id}"
+            ocr_payload = await self._call_local_ocr(info)
+            if not ocr_payload:
+                return
+            parsed_values = self._extract_local_ocr_values(expected_data, ocr_payload)
+        else:
+            handle_file_id = await self._call_parse_api(info.get("filename", ""), info.get("download_url", ""), file_type)
+            if not handle_file_id:
+                return
 
-        # 步骤3: 提取解析后的字段值
-        parsed_values = self._extract_parsed_values(parse_rows)
+            # 步骤2: 轮询等待解析完成
+            parse_rows = await self._poll_parse_result(remote_db, handle_file_id)
+            if not parse_rows:
+                return
+
+            # 步骤3: 提取解析后的字段值
+            parsed_values = self._extract_parsed_values(parse_rows)
 
         EVALUATION_WHITELIST = {
             "ZLFJ_JKTZSHRGXY": { "strict": {'jkrq', 'yjkje', 'skr', 'skzh', 'zqdm_1', 'zqdm'}, "fuzzy": {'khx', 'zqjc', 'zqmc', 'hkbz', 'cpmc'} },
@@ -1396,12 +1481,21 @@ class ProcessService:
             for info in generated_file_info:
                 info['selected_comparison_fields'] = keys
                 
-        try:
-            remote_pool = ConnectionPool(host="tgidocst.tdsql.dbdns.cn", port=6666, user="app1", password="0s#fzZU1Rq", database="tgidoc", max_connections=5)
-            remote_db = MySQLConnector(remote_pool)
-        except Exception as e:
-            logger.error(f"Failed to connect to remote DB tgidoc: {e}")
-            return
+        remote_db = None
+        if not self._is_local_ocr_enabled():
+            try:
+                remote_pool = ConnectionPool(
+                    host=os.getenv("REMOTE_PARSE_DB_HOST", "tgidocst.tdsql.dbdns.cn"),
+                    port=int(os.getenv("REMOTE_PARSE_DB_PORT", "6666")),
+                    user=os.getenv("REMOTE_PARSE_DB_USER", "app1"),
+                    password=os.getenv("REMOTE_PARSE_DB_PASSWORD", "0s#fzZU1Rq"),
+                    database=os.getenv("REMOTE_PARSE_DB_NAME", "tgidoc"),
+                    max_connections=5
+                )
+                remote_db = MySQLConnector(remote_pool)
+            except Exception as e:
+                logger.error(f"Failed to connect to remote parse DB: {e}")
+                return
             
         for info in generated_file_info:
             try: await self._evaluate_single_file(info, remote_db, db)
