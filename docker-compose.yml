@@ -1,20 +1,119 @@
-version: '3.8'
-
 services:
+  mysql:
+    image: mariadb:11.4
+    container_name: ai_testcase_generator_mysql
+    environment:
+      MARIADB_ROOT_PASSWORD: localroot
+      MARIADB_DATABASE: test_cases_db
+      MARIADB_CHARACTER_SET_SERVER: utf8mb4
+      MARIADB_COLLATION_SERVER: utf8mb4_unicode_ci
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -uroot -plocalroot --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
+  redis:
+    image: redis:8-alpine
+    container_name: ai_testcase_generator_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: ai_testcase_generator_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: ai_testcase_generator_minio_init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 2; done &&
+      mc alias set local http://minio:9000 minioadmin minioadmin &&
+      mc mb --ignore-existing local/ai-testcases
+      "
+    restart: "no"
+
+  ocr:
+    build:
+      context: ./ocr_service
+      dockerfile: Dockerfile
+    container_name: ai_testcase_generator_ocr
+    ports:
+      - "8010:8010"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    restart: unless-stopped
+
   backend:
     build:
       context: ./TestCasesGenerator
       dockerfile: Dockerfile
     container_name: ai_testcase_generator_backend
-    ports:
-      - "8000:8000"
     env_file:
       - ./TestCasesGenerator/.env
-    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+    ports:
+      - "8000:8000"
     volumes:
       - ./TestCasesGenerator:/app
-    # 如果需要在本地直接映射代码以方便开发调试，可以保留 volumes；
-    # 生产部署时建议移除该映射或改为只读。
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      ocr:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery:
+    build:
+      context: ./TestCasesGenerator
+      dockerfile: Dockerfile
+    container_name: ai_testcase_generator_celery
+    env_file:
+      - ./TestCasesGenerator/.env
+    environment:
+      PYTHONUNBUFFERED: "1"
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info --pool=solo
+    volumes:
+      - ./TestCasesGenerator:/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      minio-init:
+        condition: service_completed_successfully
+      ocr:
+        condition: service_healthy
+    restart: unless-stopped
 
   frontend:
     build:
@@ -22,7 +121,12 @@ services:
       dockerfile: Dockerfile
     container_name: ai_testcase_generator_frontend
     ports:
-      - "80:80"
+      - "3000:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
     restart: unless-stopped
+
+volumes:
+  mysql_data:
+  minio_data:

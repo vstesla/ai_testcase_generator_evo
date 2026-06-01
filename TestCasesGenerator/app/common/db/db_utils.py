@@ -43,24 +43,19 @@ class DBUtilsClass:
         sql = f"INSERT INTO {table} ({keys}) VALUES ({placeholders})"
         return self.execute_update(sql, values)
 
-    def update(self, table, data, where=None):
+    def update(self, table, data, where):
         """更新数据"""
         if not data:
-            return False
+            return 0
+        if not where:
+            raise ValueError("update requires a where condition")
 
-        set_clause = ", ".join([f"{key} = %s" for key in data.keys()])
-        params = list(data.values())
-        sql = f"UPDATE {table} SET {set_clause}"
+        set_clause = ', '.join([f"{key} = %s" for key in data.keys()])
+        where_clause = ' AND '.join([f"{key} = %s" for key in where.keys()])
+        values = tuple(data.values()) + tuple(where.values())
 
-        if where:
-            conditions = []
-            for key, value in where.items():
-                conditions.append(f"{key} = %s")
-                params.append(value)
-            if conditions:
-                sql += " WHERE " + " AND ".join(conditions)
-
-        return self.execute_update(sql, tuple(params))
+        sql = f"UPDATE {table} SET {set_clause} WHERE {where_clause}"
+        return self.execute_update(sql, values)
 
     def select(self, table, columns=None, where=None):
         """查询数据"""
