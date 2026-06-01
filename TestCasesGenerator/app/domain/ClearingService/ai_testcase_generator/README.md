@@ -108,14 +108,14 @@ curl -X GET "http://127.0.0.1:8000/ai_testcase_generator/comparison_result?test_
 ### 2.5 查询 OCR 服务状态接口
 **接口地址**：`/ai_testcase_generator/ocr_status`
 **请求方法**：`GET`
-**功能描述**：用于前端查询底层的解析小助（OCR）服务是否处于正常开启状态。
+**功能描述**：用于前端查询底层的解析小助（OCR）服务是否处于正常开启状态。系统默认使用极速的本地进程内 OCR 引擎，如果环境变量配置了 `USE_IN_PROCESS_OCR=false`，则会根据配置去检查远程微服务栈或远端 OCR 服务。
 **响应示例**：
 ```json
 {
     "code": 200,
     "message": "success",
     "data": {
-        "ocr_enabled": false
+        "ocr_enabled": true
     }
 }
 ```
@@ -167,6 +167,8 @@ curl -X GET "http://127.0.0.1:8000/ai_testcase_generator/comparison_result?test_
 
 ### 5.1 核心技术实现点
 - **最新架构与特性**:
+  - **纯本地进程内 OCR 解析**: 引入基于 `PyMuPDF` 和 `RapidOCR` 的 Python 原生函数级调用能力。省去了容器间的 HTTP 网络开销，大幅降低了环境依赖门槛，实现了生成后极速且离线的白名单评测闭环。
+  - **动态白名单比对**: 新增前端比对字段动态选择。支持根据上传的 Word 模板文件名动态解析目标比对字段，并通过 `selected_comparison_fields` 透传至后端的文本包含算法。
   - **并发性能与稳定性飞跃**: 彻底修复了 FastAPI 同步数据库查询导致的线程池死锁，以及高并发请求下的 504 Gateway Timeout 报错，优化了 MySQL 默认事务隔离与连接泄漏的问题，保证了系统在前台多轮询环境下的绝对稳定。
   - **异步架构升级**: 引入 `Celery` + `Redis` 异步任务队列，彻底解决大批量（如 300 份）协议生成导致的 HTTP 接口超时问题。
   - **大模型底座切换**: 切换至 `DeepSeek` (`deepseek-v4-flash`)，采用 OpenAI SDK 兼容模式并开启 `JSON Output` 强制规范输出，完美解决裸数字、代码表达式等解析失败问题。

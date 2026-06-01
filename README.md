@@ -20,10 +20,11 @@
 - [**TestCasesGenerator (后端)**](./TestCasesGenerator/README.md)
   - 基于 `FastAPI` 构建的高性能异步 API。
   - 集成了 `Celery` + `Redis` 异步任务队列，支持大批量并发生成任务（如一次性生成 300 份指令附件）。
+  - 集成了纯本地进程内 OCR 引擎 (`RapidOCR` + `PyMuPDF`)，支持完全离线的 PDF 文本提取及图像渲染识别，大幅提升了解析效率且无需额外部署容器。
   - 集成了 `Playwright` 用于 UI 自动化，全面对接 **DeepSeek (deepseek-v4-flash)** 大模型服务（基于 OpenAI SDK 兼容模式，开启 JSON Output 稳定输出），并引入 `Tenacity` 指数退避重试策略应对网关波动。
 - [**TestCasesGeneratorWeb (前端)**](./TestCasesGeneratorWeb/README.md)
   - 基于 `React` 和 `Ant Design` 构建的现代化单页应用 (SPA)。
-  - 提供响应式的配置面板、进度定时轮询（完美适配 Celery 后台队列）、历史数据检索及结果分析大屏。
+  - 提供响应式的配置面板、进度定时轮询（完美适配 Celery 后台队列）、动态比对字段选择、历史数据检索及结果分析大屏。
 
 ## 🚀 部署与运行策略
 
@@ -36,6 +37,7 @@
    ```bash
    cd TestCasesGenerator
    # 请确保已配置好 .env 文件 (包含 COS_SECRET_ID, REDIS_URL, DEEPSEEK_API_KEY 等敏感信息)
+   # 请确保执行过 pip install -r requirements.txt 安装了 pymupdf 和 rapidocr 等依赖
    uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
    ```
 2. **异步队列 Celery Worker 启动** (必须启动才能处理生成任务):
@@ -59,10 +61,11 @@
 # 在项目根目录下执行
 docker-compose up -d --build
 ```
+- 架构包含：`frontend`, `backend`, `celery`, `mysql`, `redis`, 以及新增的 `ocr` 微服务。
 - 前端页面访问：`http://localhost`
 - 后端接口访问：`http://localhost:8000/docs`
 
-> **注意**：容器化部署时，同样需要在后端目录下提供包含有效密钥的 `.env` 文件。
+> **注意**：容器化部署时，同样需要在后端目录下提供包含有效密钥的 `.env` 文件。后端系统可通过设置 `USE_IN_PROCESS_OCR=false` 并配置 `LOCAL_OCR_URL=http://ocr:8010` 切换到微服务模式。
 
 ## 📝 团队开发规范
 
