@@ -494,7 +494,12 @@ class ProcessService:
                         logger.warning(f"Failed to clean up CKXY PDF file {local_pdf_path}: {e}")
         
         if enable_comparison:
-            asyncio.create_task(self._parse_and_evaluate(test_case_id_batch, generated_file_info))
+            from app.domain.ClearingService.ai_testcase_generator.tasks import compare_attachments_task
+            compare_attachments_task.delay(
+                test_case_id=test_case_id_batch,
+                generated_file_info=generated_file_info,
+                business_process=business_process
+            )
             is_comparison_done = False
         else:
             is_comparison_done = True
@@ -1043,16 +1048,16 @@ class ProcessService:
             for info in generated_file_info:
                 info['selected_comparison_fields'] = keys
         
-        # 4. 若开启对比开关，则触发后台异步轮询评测任务
+        # 4. 若开启对比开关，则通过 Celery 任务后台异步评测（确保进程重启不丢失）
         if enable_comparison:
             if not defer_comparison_task:
-                import asyncio
-                asyncio.create_task(self._parse_and_evaluate(
-                    test_case_id=final_test_case_id, 
+                from app.domain.ClearingService.ai_testcase_generator.tasks import compare_attachments_task
+                compare_attachments_task.delay(
+                    test_case_id=final_test_case_id,
                     generated_file_info=generated_file_info,
                     business_process=business_process,
                     selected_comparison_fields=selected_comparison_fields
-                ))
+                )
             is_comparison_done = False
         else:
             is_comparison_done = True
@@ -1185,8 +1190,8 @@ class ProcessService:
     async def _call_local_ocr(self, info: Dict[str, Any]) -> Dict[str, Any]:
         """
         调用本地 OCR 服务（或直接使用进程内 OCR）。服务返回纯文本后，后端按预期字段做包含式匹配，
-        用于替代原项目内网解析小助的字段结构化能力。
         """
+        
         import requests
         from pathlib import Path
         
@@ -1507,6 +1512,14 @@ class ProcessService:
                 remote_db = MySQLConnector(remote_pool)
             except Exception as e:
                 logger.error(f"Failed to connect to remote parse DB: {e}")
+                # 即使远程 DB 连接失败，也要标记比对完成，防止前端永久轮询
+                try:
+                    db.execute_update(
+                        "UPDATE ai_testcase_generate_record SET is_comparison_done = 1, update_time = NOW(), message = CONCAT(message, %s) WHERE test_case_id = %s",
+                        ("; 远程解析数据库连接失败，比对评测未执行", test_case_id)
+                    )
+                except Exception as update_err:
+                    logger.error(f"Failed to update is_comparison_done after remote DB failure: {update_err}")
                 return
             
         for info in generated_file_info:

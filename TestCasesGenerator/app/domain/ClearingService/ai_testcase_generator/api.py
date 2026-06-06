@@ -36,9 +36,8 @@ class BusinessProcessEnum(str, Enum):
 
 
 def _record_generation_result(result: dict):
+    """将生成结果持久化到数据库。复用模块级 DBUtils 单例，避免重复创建连接池。"""
     try:
-        from app.common.db.db_utils import DBUtils
-        DB = DBUtils()
         from datetime import datetime
         existing = DB.select(table='ai_testcase_generate_record', columns=['test_case_id','status','message','create_time','update_time'], where={"test_case_id": result["TestCaseID"]})
         if not existing:

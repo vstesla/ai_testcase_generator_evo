@@ -110,6 +110,7 @@ class ObjectStorage:
         if not DB.connect():
             raise Exception("数据库连接失败")
         
+        storage_path = f"<file_id={file_id}>"
         try:
             col = DB.select('file_common_table', where={'file_id': file_id})
             DB.disconnect()
@@ -134,6 +135,7 @@ class ObjectStorage:
         if not DB.connect():
             raise Exception("数据库连接失败")
         
+        storage_path = f"<file_id={file_id}>"
         try:
             col = DB.select('file_common_table', where={'file_id': file_id})
             DB.disconnect()
@@ -208,6 +210,7 @@ class ObjectStorage:
         if not DB.connect():
             raise Exception("数据库连接失败")
         
+        storage_path = f"<file_id={file_id}>"
         try:
             col = DB.select('file_common_table', where={'file_id': file_id})
             DB.disconnect()

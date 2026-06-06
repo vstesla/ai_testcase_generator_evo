@@ -15,15 +15,25 @@ class DBUtilsClass:
         return self
 
     def connect(self):
-        """验证数据库连接是否可用"""
+        """验证数据库连接是否可用（获取连接 → 校验 → 立即归还连接池）"""
         try:
-            return self.connector.connect()
+            conn = self.connector.pool.get_connection()
+            if not conn:
+                return False
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT 1")
+                cursor.close()
+                return True
+            finally:
+                # 无论校验成功与否，都要把连接归还连接池
+                self.connector.pool.release_connection(conn)
         except Exception as e:
             logger.error(f"DB Connect check failed: {e}")
             return False
 
     def disconnect(self):
-        """断开连接"""
+        """断开连接（连接已由 connect() 自动归还，此处为兼容旧调用链保留）"""
         pass
 
     def execute_query(self, query, params=None):

@@ -2,10 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# 安装 Playwright 及其他系统依赖
+# 安装 Playwright、RapidOCR (OpenCV) 及其他系统依赖
 RUN apt-get update && apt-get install -y \
     build-essential \
     libffi-dev \
+    libgl1 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # 复制依赖文件

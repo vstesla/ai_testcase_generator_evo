@@ -34,22 +34,23 @@
 
 ## 2. 环境依赖与运行
 
-### 2.1 容器化部署（推荐）
-本项目已完成全栈容器化，支持一键部署。请确保本地已安装 [Docker](https://www.docker.com/) 和 Docker Compose。
+### 2.1 容器化部署（推荐，MacOS / Linux）
+本项目已完成全栈容器化，支持一键部署。请确保本地已安装 [Docker Desktop](https://www.docker.com/)。
 
-在项目**根目录（TestCasesGeneratorEVO）**下，执行以下命令即可启动前后端服务：
+在项目**根目录（TestCasesGeneratorEVO）**下执行：
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
-- 前端页面访问：`http://localhost` (Nginx 代理，端口 80)
-- 后端 API 访问：`http://localhost:8000/docs` (FastAPI Swagger 文档)
+- 前端页面访问：`http://localhost:3000`
+- 后端 API 文档：`http://localhost:8000/docs`
 
 **注意事项**：
-1. 启动前，请确保在 `TestCasesGenerator` 目录下创建并配置好 `.env` 文件（如 COS 和 MySQL 环境变量）。
-2. 容器内已默认安装 Playwright 所需的 Chromium 浏览器及相关依赖，无需手动执行安装命令。
+1. 启动前需在 `TestCasesGenerator/` 下创建 `.env` 文件（填写 DEEPSEEK_API_KEY，其余有默认值）。
+2. MySQL 容器首次启动时会自动执行 `docker/mysql/init/001_schema.sql` 建表。
+3. 使用 MinIO 作为本地对象存储（`http://localhost:9001`），无需连接云端 COS。
 
-### 2.2 本地环境配置
-本项目使用 Python 编写，主要依赖项包括 `FastAPI`, `Celery`, `Uvicorn`, `Playwright` 等。请确保您已配置相关的数据库 (MySQL)、Redis 缓存与 COS 存储环境变量。
+### 2.2 本地开发环境
+本项目使用 Python 3.12，主要依赖项包括 `FastAPI`, `Celery`, `Uvicorn`, `RapidOCR`, `PyMuPDF`, `Playwright`, `ReportLab` 等。
 
 如果需要使用 `in_flight_rules_automation_tools` 进行 UI 自动化，请确保已安装 Playwright 驱动：
 ```bash
@@ -58,19 +59,20 @@ playwright install chromium
 ```
 
 ### 2.3 启动服务
-在项目根目录下，必须分别启动 API 服务和异步任务队列。
+在 `TestCasesGenerator/` 目录下，必须分别启动 API 服务和异步任务队列。
 
-**启动全局的 API 服务**：
+**启动 API 服务**：
 ```bash
-python app/main.py
-# 或使用 uvicorn app.main:app --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
-服务将在 `http://127.0.0.1:8000` 启动，所有的子模块路由将挂载在主服务下。
 
-**启动 Celery 任务队列**（处理生成请求必需）：
+**启动 Celery Worker**（处理生成任务必需）：
 ```bash
-# Windows 环境推荐使用 threads 模式，避免事件循环冲突
-celery -A app.core.celery_app worker --loglevel=info -P threads -c 10
+# macOS/Linux：使用 prefork 池（默认）
+celery -A app.core.celery_app worker --loglevel=info -c 10
+
+# 开发调试：使用 solo 模式避免 fork 问题
+celery -A app.core.celery_app worker --loglevel=info --pool=solo
 ```
 
 ---

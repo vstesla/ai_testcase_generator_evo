@@ -216,32 +216,38 @@ curl -X GET "http://127.0.0.1:8000/ai_testcase_generator/comparison_result?test_
 
 ## 6. 环境配置
 
-系统依赖以下配置（目前在 `llm_service.py` 和 `cos.py` 中配置）：
+系统依赖以下环境变量（通过 `.env` 文件或系统环境变量配置）：
 
-*   **LLM (Internal AI Agent)**:
-    *   API Gateway: `http://testhub-ai-runtime-gateway.paasuat.cmbchina.cn/agent/v1/chat-messages`
-    *   Tokens: 针对不同任务配置了特定的 App Token (`spvSubjectType`, `prdInvestmentScope`, `spvInvestmentScope`, `adversarial`, `ckxy`)。
-*   **COS (Tencent Cloud)**:
-    *   `access_key`, `secretKey`, `endpoint`, `region`, `bucketName` (在 `app/common/cos.py` 中配置)。
-*   **Database (MySQL)**:
-    *   `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` (通过环境变量配置)。
-    *   需要确保存在表 `file_common_table` 以及 `ai_testcase_generate_record`。
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | (**必填**) |
+| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com` |
+| `DEEPSEEK_MODEL` | 模型名称 | `deepseek-v4-flash` |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` | MySQL 连接信息 | 见 `.env` |
+| `COS_SECRET_ID` / `COS_SECRET_KEY` / `COS_ENDPOINT` / `COS_BUCKET_NAME` | 对象存储配置 | MinIO 本地或腾讯云 COS |
+| `REDIS_URL` | Celery Broker 地址 | `redis://127.0.0.1:6379/0` |
+| `USE_IN_PROCESS_OCR` | 使用进程内 OCR | `true` |
+
+> **Docker 部署**：容器内已预配置 MinIO 作为本地对象存储、MariaDB 作为数据库、Redis 作为消息队列。只需在 `.env` 中填入 `DEEPSEEK_API_KEY` 即可启动。
 
 ## 7. 运行与测试
 
-### 启动服务 (Server)
-在项目根目录下运行：
-```powershell
-python app/main.py
+### Docker 部署（推荐）
+```bash
+# 在项目根目录执行
+docker compose up -d --build
 ```
-服务将在 `http://127.0.0.1:8000` 启动。
+访问 `http://localhost:8000/docs` 查看 API 文档。
 
-### 运行测试客户端 (Client)
-确保 `Templets/SmartJudgeConfigs.xlsx` 存在，然后在根目录下运行：
-```powershell
-python app/domain/ClearingService/ai_testcase_generator/test_client.py
+### 本地启动 (macOS/Linux)
+```bash
+# API 服务
+cd TestCasesGenerator
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+# Celery Worker
+celery -A app.core.celery_app worker --loglevel=info -c 10
 ```
-该脚本将自动调用接口并验证结果。
 
 ## 8. 注意事项
 
